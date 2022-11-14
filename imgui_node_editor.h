@@ -18,7 +18,7 @@
 # include <imgui.h>
 # include <cstdint> // std::uintXX_t
 # include <utility> // std::move
-
+# include <string>
 
 //------------------------------------------------------------------------------
 # define IMGUI_NODE_EDITOR_VERSION      "0.9.2"
@@ -85,7 +85,7 @@ struct Config
 {
     using CanvasSizeModeAlias = ax::NodeEditor::CanvasSizeMode;
 
-    const char*             SettingsFile;
+    std::string             SettingsFile;
     ConfigSession           BeginSaveSession;
     ConfigSession           EndSaveSession;
     ConfigSaveSettings      SaveSettings;
@@ -101,7 +101,7 @@ struct Config
     int                     ContextMenuButtonIndex; // Mouse button index context menu action will react to (0-left, 1-right, 2-middle)
 
     Config()
-        : SettingsFile("NodeEditor.json")
+        : SettingsFile(std::string("NodeEditor.json"))
         , BeginSaveSession(nullptr)
         , EndSaveSession(nullptr)
         , SaveSettings(nullptr)

@@ -1,7 +1,9 @@
-# include "application.h"
-# include "setup.h"
-# include "platform.h"
-# include "renderer.h"
+#include "application.h"
+#include "setup.h"
+#include "platform.h"
+#include "renderer.h"
+#include <iostream>
+
 
 extern "C" {
 #define STB_IMAGE_IMPLEMENTATION
@@ -9,6 +11,7 @@ extern "C" {
 #include "stb_image.h"
 }
 
+using namespace std;
 
 Application::Application(const char* name)
     : Application(name, 0, nullptr)
@@ -98,8 +101,8 @@ void Application::RecreateFontAtlas()
     config.OversampleV = 4;
     config.PixelSnapH = false;
 
-    m_DefaultFont = io.Fonts->AddFontFromFileTTF("data/Play-Regular.ttf", 18.0f, &config);
-    m_HeaderFont  = io.Fonts->AddFontFromFileTTF("data/Cuprum-Bold.ttf",  20.0f, &config);
+    m_DefaultFont = io.Fonts->AddFontFromFileTTF("examples/data/Play-Regular.ttf", 18.0f, &config);
+    m_HeaderFont  = io.Fonts->AddFontFromFileTTF("examples/data/Cuprum-Bold.ttf",  20.0f, &config);
 
     io.Fonts->Build();
 }

@@ -5736,9 +5736,9 @@ std::string ed::Config::Load()
             LoadSettings(const_cast<char*>(data.data()), UserPointer);
         }
     }
-    else if (SettingsFile)
+    else if (!std::string(SettingsFile).empty())
     {
-        std::ifstream file(SettingsFile);
+        std::ifstream file{std::string(SettingsFile)};
         if (file)
         {
             file.seekg(0, std::ios_base::end);
@@ -5782,9 +5782,9 @@ bool ed::Config::Save(const std::string& data, SaveReasonFlags flags)
     {
         return SaveSettings(data.c_str(), data.size(), flags, UserPointer);
     }
-    else if (SettingsFile)
+    else if (!std::string(SettingsFile).empty())
     {
-        std::ofstream settingsFile(SettingsFile);
+        std::ofstream settingsFile{SettingsFile};
         if (settingsFile)
             settingsFile << data;
 
