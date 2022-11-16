@@ -55,6 +55,7 @@ using ax::Widgets::IconType;
 
 static ed::EditorContext* m_Editor = nullptr;
 ed::Config*               config = nullptr;
+vector<tuple<int, float, float>> json_info;
 
 
 bool                 xml_ready = false;
@@ -84,11 +85,8 @@ enum class PinKind {
 
 
 enum class NodeType {
-    Blueprint,
-    Simple,
-    Tree,
-    Comment,
-    Houdini
+    Value,
+    Element
 };
 
 
@@ -258,7 +256,7 @@ struct Example:
 
 
         bool CanCreateLink(Pin* a, Pin* b) {
-            if (!a || !b || a == b || a->Kind == b->Kind || a->Type != b->Type || a->Node == b->Node)
+            if(!a || !b || a == b || a->Kind == b->Kind || a->Type != b->Type || a->Node == b->Node)
                 return false;
 
             return true;
@@ -454,7 +452,16 @@ struct Example:
         }
 
 
-        Graph* build(const xml_node<>* node, int *current, Graph* parent) {
+        void getPositionFromJSON(ed::NodeID ID, float *x, float *y) {
+            for(auto n : json_info)
+                if(get<0>(n) == ID) {
+                    *x = get<1>(n); *y = get<2>(n);
+                    break; 
+                }
+        }
+
+
+        Graph* build(const xml_node<>* node, int *current, Graph* parent, bool flag) {
             Graph* temp = new Graph;
             
             temp->current = *current;
@@ -462,24 +469,39 @@ struct Example:
 
             bool isRoot = parent ? false : true;
             Node* imgui_node;
+            float x, y;
 
             switch(node->type()) {
                 case node_element:
                     imgui_node = SpawnAttributeNode(isRoot, node->name(), node);
+                    imgui_node->Type = NodeType::Element;
+
+                    if(flag) {
+                        getPositionFromJSON(imgui_node->ID, &x, &y);
+                        ed::SetNodePosition(imgui_node->ID, ImVec2(x, y));
+                    }
+
                     temp->ID = imgui_node->ID;
-                    temp->Size = imgui_node->Size;
+                    temp->Size = ed::GetNodeSize(imgui_node->ID);
 
                     for(const xml_node<>* n = node->first_node(); n; n = n->next_sibling()) {
                         (*current)++;
-                        (temp->childs).push_back(build(n, current, temp));
+                        (temp->childs).push_back(build(n, current, temp, flag));
                     }
 
                     break;
 
                 case node_data:
                     imgui_node = SpawnValueNode(node->value());
+                    imgui_node->Type = NodeType::Value;
+
+                    if(flag) {
+                        getPositionFromJSON(imgui_node->ID, &x, &y);
+                        ed::SetNodePosition(imgui_node->ID, ImVec2(x, y));
+                    }
+
                     temp->ID = imgui_node->ID;
-                    temp->Size = imgui_node->Size;
+                    temp->Size = ed::GetNodeSize(imgui_node->ID);
                     break;
             
                 default:
@@ -946,6 +968,7 @@ struct Example:
 
         }
 
+
         void loadXML() {
             ifstream file((path + string(xml_name).c_str()));
 
@@ -965,16 +988,19 @@ struct Example:
             ImGui::Text("FPS: %.2f (%.2gms)", io.Framerate, io.Framerate ? 1000.0f / io.Framerate : 0.0f);
 
             if(config_ready && xml_changed) {
+                json_info = loadJSON();
+                
+                loadXML();
 
-                //printConfig(true);
+                int current = 0;
+                graph = build(root_node, &current, NULL, true);
 
-                vector<tuple<int, float, float>> json_info = loadJSON();
             }
             else if(xml_ready && xml_changed) {
                 loadXML();
                 
                 int current = 0;
-                graph = build(root_node, &current, NULL);
+                graph = build(root_node, &current, NULL, false);
 
                 levels_x = levelXOrder(graph);
                 link(graph, &levels_x);
@@ -1726,7 +1752,6 @@ struct Example:
             ImGui::PopStyleVar();
             ed::Resume();
         # endif
-        
 
             ed::End();
 
@@ -1771,7 +1796,7 @@ struct Example:
             }
 
         }
-        
+
         xml_document<>                          doc;
         xml_node<>*                             root_node = nullptr;
         int                                     m_NextId = 1;
