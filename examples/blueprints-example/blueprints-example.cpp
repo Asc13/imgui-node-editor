@@ -894,8 +894,19 @@ struct Example:
         }
 
 
-        void saveJSON() {
+        void saveJSON(Graph* graph) {
 
+            if(graph){
+
+                ImVec2 pos = ed::getNodePosition(graph->ID);
+                
+                fd << "{\n" << "\tid = " << graph->ID << endl <<"\tx = " << pos.x << endl <<"\ty = " << pos.y << "\n},\n"
+
+                for(auto c : graph->childs)
+                    saveJSON(c);
+
+            }
+                
         }
             
 
