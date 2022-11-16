@@ -15,27 +15,21 @@
 #include <map>
 #include <algorithm>
 #include <utility>
-
-
 #include <iostream>
 #include <fstream>
 #include <vector>
-#include "rapidxml.hpp"
+#include "managers/rapidxml.hpp"
+#include "managers/rapidjson/document.h"
+#include "managers/rapidjson/writer.h"
+#include "managers/rapidjson/stringbuffer.h"
+
 
 using namespace std;
 using namespace rapidxml;
+using namespace rapidjson;
 
 
-xml_document<> doc;
-xml_node<>* root_node = NULL;
-bool xml_ready = false;
-bool xml_changed = false;
-bool config_ready = false;
-bool load_ready = false;
 string path = "examples/blueprints-example/";
-char xml_name[64] = "";
-string json_name;
-string dtd_file = "";
 
 
 static inline ImRect ImGui_GetItemRect() {
@@ -60,7 +54,15 @@ using namespace ax;
 using ax::Widgets::IconType;
 
 static ed::EditorContext* m_Editor = nullptr;
-ed::Config* config = nullptr;
+ed::Config*               config = nullptr;
+
+
+bool                 xml_ready = false;
+bool                 xml_changed = false;
+bool                 config_ready = false;
+char                 xml_name[64] =  "";
+string               json_name;
+string               dtd_file = "";
 
 
 enum class PinType {
@@ -341,6 +343,7 @@ struct Example:
             return levels;
         }
 
+
         int height(Graph* node) {
             vector<int> heights;
             heights.push_back(0);
@@ -396,6 +399,7 @@ struct Example:
 
 
         void release() {
+            m_NextId = 1;
             m_Nodes.clear();
             m_Links.clear();
             levels_x.clear();
@@ -407,6 +411,11 @@ struct Example:
             if(graph)
                 delete graph;
                 graph = new Graph;
+
+            if(&doc) {
+                doc.clear();
+                root_node = NULL;
+            }
         }
 
 
@@ -706,8 +715,6 @@ struct Example:
 
             if(ImGui::Button("Save") && regex_search(json_name, regex(".json"))) {
                 config->SettingsFile = (path + json_name);
-                
-                cout << (path + json_name) << endl;
 
                 config->UserPointer = this;
                 
@@ -715,6 +722,7 @@ struct Example:
                     auto self = static_cast<Example*>(userPointer);
 
                     auto node = self->FindNode(nodeId);
+
                     if(!node)
                         return false;
 
@@ -724,7 +732,11 @@ struct Example:
 
                     return true;
                 };
+
+                //printConfig(false);
             }
+
+            
 
             ImGui::EndHorizontal();
 
@@ -882,10 +894,62 @@ struct Example:
         }
 
 
-        void readXML() {
-            ifstream theFile((path + string(xml_name).c_str()));
+        void saveJSON() {
 
-            vector<char> buffer((istreambuf_iterator<char>(theFile)), istreambuf_iterator<char>());
+        }
+            
+
+        vector<tuple<int, float, float>> loadJSON() {
+            ifstream file((path + string(json_name).c_str()));
+
+            vector<char> buf((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+            buf.push_back('\0');
+
+            Document mydoc;
+            mydoc.Parse(&buf[0]);
+            StringBuffer sb;
+            Writer<StringBuffer> writer(sb);
+
+            vector<tuple<int, float, float>> info;
+            int id;
+            float x, y;
+
+            const Value &ns = mydoc["nodes"];
+
+            assert(ns.IsArray());
+
+            for(Value::ConstValueIterator it1 = ns.Begin(); it1 != ns.End(); ++it1) {
+                const Value &n = *it1;
+                assert(n.IsObject());
+                
+                for(Value::ConstMemberIterator it2 = n.MemberBegin(); it2 != n.MemberEnd(); ++it2) {              
+                    const char* name = it2->name.GetString();
+                    
+                    if(strcmp(name, "id") == 0)
+                        id = it2->value.GetInt();
+
+                    else if(strcmp(name, "x") == 0)
+                        x = it2->value.GetFloat();
+
+                    else if(strcmp(name, "y") == 0)
+                        y = it2->value.GetFloat();
+                }
+
+                info.push_back(make_tuple(id, x, y));
+            }
+
+            return info;
+        }
+
+
+        void saveXML() {
+
+        }
+
+        void loadXML() {
+            ifstream file((path + string(xml_name).c_str()));
+
+            vector<char> buffer((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
             buffer.push_back('\0');
             doc.parse<0>(&buffer[0]);
 
@@ -897,33 +961,17 @@ struct Example:
             UpdateTouch();
 
             auto& io = ImGui::GetIO();
-
+            
             ImGui::Text("FPS: %.2f (%.2gms)", io.Framerate, io.Framerate ? 1000.0f / io.Framerate : 0.0f);
 
             if(config_ready && xml_changed) {
-                config->SettingsFile = (path + json_name);
 
-                config->UserPointer = this;
+                //printConfig(true);
 
-                config->LoadNodeSettings = [](ed::NodeId nodeId, char* data, void* userPointer) -> size_t {
-                    auto self = static_cast<Example*>(userPointer);
-
-                    auto node = self->FindNode(nodeId);
-                    
-                    if(!node)
-                        return 0;
-
-                    if(data != nullptr)
-                        memcpy(data, node->State.data(), node->State.size());
-                    return node->State.size();
-                };
-
-                m_Editor = ed::CreateEditor(config);
-                ed::SetCurrentEditor(m_Editor);
-
+                vector<tuple<int, float, float>> json_info = loadJSON();
             }
             else if(xml_ready && xml_changed) {
-                readXML();
+                loadXML();
                 
                 int current = 0;
                 graph = build(root_node, &current, NULL);
@@ -1723,20 +1771,21 @@ struct Example:
             }
 
         }
-
-
-        int                  m_NextId = 1;
-        const int            m_PinIconSize = 24;
-        vector<Node>         m_Nodes;
-        vector<Link>         m_Links;
-        Graph*               graph;
-        vector<vector<int>>  levels_x;
-        ImTextureID          m_HeaderBackground = nullptr;
-        ImTextureID          m_SaveIcon = nullptr;
-        ImTextureID          m_RestoreIcon = nullptr;
-        const float          m_TouchTime = 1.0f;
-        map<ed::NodeId, float, NodeIdLess> m_NodeTouchTime;
-        bool                 m_ShowOrdinals = false;
+        
+        xml_document<>                          doc;
+        xml_node<>*                             root_node = nullptr;
+        int                                     m_NextId = 1;
+        const int                               m_PinIconSize = 24;
+        vector<Node>                            m_Nodes;
+        vector<Link>                            m_Links;
+        Graph*                                  graph;
+        vector<vector<int>>                     levels_x;
+        ImTextureID                             m_HeaderBackground = nullptr;
+        ImTextureID                             m_SaveIcon = nullptr;
+        ImTextureID                             m_RestoreIcon = nullptr;
+        const float                             m_TouchTime = 1.0f;
+        map<ed::NodeId, float, NodeIdLess>      m_NodeTouchTime;
+        bool                                    m_ShowOrdinals = false;
 };
 
 
