@@ -916,8 +916,19 @@ struct Example:
         }
 
 
-        void saveJSON() {
+        void saveJSON(Graph* graph) {
 
+            if(graph){
+
+                ImVec2 pos = ed::getNodePosition(graph->ID);
+                
+                fd << "{\n" << "\tid = " << graph->ID << endl <<"\tx = " << pos.x << endl <<"\ty = " << pos.y << "\n},\n"
+
+                for(auto c : graph->childs)
+                    saveJSON(c);
+
+            }
+                
         }
             
 
@@ -963,9 +974,32 @@ struct Example:
             return info;
         }
 
+        void saveXML(Graph* graph, int fd) {
+            if(graph){
+                ed::Node temp = getNode(graph->ID);
+                if(temp->Type == NodeType::Element){
+                    fd << "<" << temp->Name
+                    for(int i = 0; i<temp->Inputs.size; i++){
+                        fd << " " << temp->Inputs[i]
+                    }
+                    if (temp->Inputs.size()){
+                        fd << ">" << endl;
+                    }
+                } else {
+                     fd << temp->Name;
+                }
+                   
+                for(auto c : graph->childs){
+                    saveXML(c, fd);
+                }
 
-        void saveXML() {
-
+                if ((graph->childs[0])->Type == NodeType::Element){
+                    fd << endl;
+                }
+                if(temp->Type == NodeType::Element){
+                    fd << "</" << temp->Name << ">" << endl;
+                }
+            }
         }
 
 
