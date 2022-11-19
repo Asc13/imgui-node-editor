@@ -67,7 +67,6 @@ vector<Graph*>                   secondaryGraphs;
 bool                 xml_ready = false;
 bool                 xml_changed = false;
 bool                 config_ready = false;
-bool                 released = true;
 char                 xml_name[64] =  "";
 char                 temp_name[64] = "";
 string               json_name;
@@ -451,9 +450,10 @@ struct Example:
 
         void deleteGraph(Graph* graph) {
             if(graph) {
-                for(auto c : graph->childs)           
+
+                for(auto c : graph->childs)        
                     deleteGraph(c);
-                
+
                 delete graph;
             }
         }
@@ -493,9 +493,9 @@ struct Example:
                             break;
                         i++;
                     }
-                    
-                    ((graph->parent)->childs).at(i) = NULL;
 
+                    ((graph->parent)->childs).at(i) = NULL;
+                    (graph->parent)->childs.erase((graph->parent)->childs.begin() + i - 1);
 
                     deleteNodes(graph);
                     deleteGraph(graph);
@@ -523,34 +523,34 @@ struct Example:
 
             if(graph) {
                 deleteGraph(graph);
-                graph = new Graph;
+                graph = NULL;
             }
 
             if(&doc) {
                 doc.clear();
                 root_node = NULL;
             }
-
-            released = true;
         }
 
 
         void printNode(Graph* graph) {
-            cout << "ID: " << graph->ID.Get() << endl;
-            cout << "Current: " << graph->current << endl;
-            cout << "Parent: " << ((graph->parent) ? ((graph->parent)->ID.Get()) : -1) << endl;
-            cout << "Level X: " << graph->level_x << endl;
-            cout << "Level Y: " << graph->level_y << endl;
-            cout << "Childs: ";
-            
-            for(auto c : graph->childs)
-                if(c)    
+            if(graph) {        
+                cout << "ID: " << graph->ID.Get() << endl;
+                cout << "Current: " << graph->current << endl;
+                cout << "Parent: " << ((graph->parent) ? ((graph->parent)->ID.Get()) : -1) << endl;
+                cout << "Level X: " << graph->level_x << endl;
+                cout << "Level Y: " << graph->level_y << endl;
+                
+                cout << "Childs: ";
+                
+                for(auto c : graph->childs)
                     cout << c->ID.Get() << " ";
-            cout << endl << endl;
+                
+                cout << endl << endl;
 
-            for(auto c : graph->childs)
-                if(c)
+                for(auto c : graph->childs)
                     printNode(c);
+            }
         }
 
 
@@ -1440,9 +1440,8 @@ struct Example:
                                 
                                 else
                                     release();
-                           
+
                                 //printNode(graph);
-                                //cout << endl << endl;
                             }
                         }
                     }
