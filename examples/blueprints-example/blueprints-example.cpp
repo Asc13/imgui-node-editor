@@ -19,11 +19,13 @@
 #include <fstream>
 #include <fcntl.h>
 #include <unistd.h>
+#include <mutex>
 #include <vector>
 #include "managers/rapidxml.hpp"
 #include "managers/rapidjson/document.h"
 #include "managers/rapidjson/writer.h"
 #include "managers/rapidjson/stringbuffer.h"
+
 
 
 using namespace std;
@@ -32,7 +34,7 @@ using namespace rapidjson;
 
 
 string path = "examples/blueprints-example/";
-
+mutex mtx;
 
 static inline ImRect ImGui_GetItemRect() {
     return ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
@@ -255,6 +257,24 @@ struct Example:
         }
 
 
+        Node* FindNodeWithPin(ed::PinId id) {
+            if(!id)
+                return nullptr;
+
+            for(auto& node : m_Nodes) {
+                for(auto& pin : node.Inputs)
+                    if(pin.ID == id)
+                        return &node;
+
+                for(auto& pin : node.Outputs)
+                    if(pin.ID == id)
+                        return &node;
+            }
+
+            return nullptr;
+        }
+
+
         bool IsPinLinked(ed::PinId id) {
             if(!id)
                 return false;
@@ -407,7 +427,44 @@ struct Example:
         }
 
 
+        void lookup(Graph* graph, Graph* res, ed::NodeId ID, bool* found) {
+            if(graph) {
+                if(!(graph->childs).empty())
+                    lookup((graph->childs).at(0), res, ID, found);
+
+                if(graph->ID == ID) {
+                    res = graph;
+                    *found = true;
+                }
+
+                if(!(*found))
+                    lookup(rightSibling(graph), res, ID, found);
+            }
+        }
+
+
+        Graph* getGraphByNode(ed::NodeId ID) {
+            Graph* temp = NULL;
+            bool found = false;
+
+            lookup(graph, temp, ID, &found);
+            
+            if(found)
+                return temp;
+
+            for(auto g : secondaryGraphs) {
+                lookup(g, temp, ID, &found);
+
+                if(found)
+                    return temp;
+            }
+
+            return temp;
+        }
+
+
         void lookupLink(Graph* graph, Link* link) {
+            
         }
 
 
@@ -417,17 +474,17 @@ struct Example:
 
 
         void createSecondaryGraph(Node* node) {
-            /*Graph* temp = new Graph;
+            Graph* temp = new Graph;
             vector<Graph*> childs;
 
             temp->parent = NULL;
-            temp->node = node;
+            temp->ID = node->ID;
             temp->level_x = 0;
             temp->level_y = 0;
             temp->childs = childs;
-            temp->current = current;
+            temp->current = current++;
 
-            (*secondaryGraphs).push_back(temp);*/
+            secondaryGraphs.push_back(temp);
         }
 
 
@@ -448,68 +505,86 @@ struct Example:
         }
 
 
-        void deleteGraph(Graph* graph) {
+        void recDelete(Graph* graph) {
             if(graph) {
-
                 for(auto c : graph->childs)        
-                    deleteGraph(c);
+                    recDelete(c);
 
-                delete graph;
+                graph->childs.clear();
+                
+                if(graph->parent)
+                    delete graph;
             }
         }
 
 
-        Graph* rightSibling(Graph* graph) {
-            if(graph->parent) {
-                int i = 0;
+        void deleteGraph(Graph** graph) {
+            mtx.lock();
+            recDelete(*graph);
+            *graph = NULL;
+            mtx.unlock();
+        }
 
-                for(auto c : (graph->parent)->childs) {
-                    i++;
-                    if(c->current == graph->current)
-                        break;
-                }
-                
-                if(i < ((graph->parent)->childs).size())
+
+        Graph* rightSibling(Graph* graph) {
+            int i = 0;
+
+            for(auto c : (graph->parent)->childs) {
+                i++;
+
+                if(c->ID == graph->ID && i < ((graph->parent)->childs).size())
                     return ((graph->parent)->childs).at(i);
-                else
-                    return NULL;
             }
+
             return NULL;
         }
 
 
         void lookupDeleteGraph(Graph* graph, ed::NodeId ID, bool *deleted) {
             if(graph) {
-                
                 if(!(graph->childs).empty())
                     lookupDeleteGraph((graph->childs).at(0), ID, deleted);
 
-                if((graph->ID).Get() == ID.Get()) {
-                    int i = 0;
+                if(graph->ID == ID) {
+                    if(graph->parent) {
+                        int i = 0;
 
-                    
-                    for(auto a : (graph->parent)->childs) {
-                        if(a == graph)
-                            break;
-                        i++;
+                        for(auto a : (graph->parent)->childs) {
+                            if(a->ID == graph->ID)
+                                break;
+                            i++;
+                        }
+
+                        ((graph->parent)->childs).at(i) = NULL;
+                        ((graph->parent)->childs).erase(((graph->parent)->childs).begin() + i);
                     }
 
-                    ((graph->parent)->childs).at(i) = NULL;
-                    (graph->parent)->childs.erase((graph->parent)->childs.begin() + i - 1);
-
                     deleteNodes(graph);
-                    deleteGraph(graph);
+                    deleteGraph(&graph);
+
                     *deleted = true;
                 }
 
-                if(!(*deleted))
+                if(!(*deleted) && graph->parent)
                     lookupDeleteGraph(rightSibling(graph), ID, deleted);
             }
         }
 
 
-        void lookupDeleteSecondaryGraph() {
-            
+        void lookupDeleteSecondaryGraph(ed::NodeId ID, bool *deleted) {
+            int i = 0;
+
+            for(auto g : secondaryGraphs) {
+                lookupDeleteGraph(g, ID, deleted);
+
+                if(*deleted) {
+                    secondaryGraphs.at(i) = NULL;
+                    secondaryGraphs.erase(secondaryGraphs.begin() + i - 1);
+                    break;
+                }
+
+                i++;
+            }
         }
 
 
@@ -519,12 +594,13 @@ struct Example:
             m_Nodes.clear();
             m_Links.clear();
             levels_x.clear();
+
+            for(auto g : secondaryGraphs)
+                delete g;
             secondaryGraphs.clear();
 
-            if(graph) {
-                deleteGraph(graph);
-                graph = NULL;
-            }
+            if(graph)
+                deleteGraph(&graph);
 
             if(&doc) {
                 doc.clear();
@@ -537,7 +613,7 @@ struct Example:
             if(graph) {        
                 cout << "ID: " << graph->ID.Get() << endl;
                 cout << "Current: " << graph->current << endl;
-                cout << "Parent: " << ((graph->parent) ? ((graph->parent)->ID.Get()) : -1) << endl;
+                cout << "Parent: " << ((graph->parent) ? (int) ((graph->parent)->ID.Get()) : -1) << endl;
                 cout << "Level X: " << graph->level_x << endl;
                 cout << "Level Y: " << graph->level_y << endl;
                 
@@ -580,7 +656,7 @@ struct Example:
             for(auto n : json_info)
                 if(get<0>(n) == ID) {
                     *x = get<1>(n); *y = get<2>(n);
-                    break; 
+                    break;
                 }
         }
 
@@ -648,7 +724,7 @@ struct Example:
 
 
         void OnStop() override {
-            release();
+            //release();
 
             auto releaseTexture = [this](ImTextureID& id) {
                 if(id) {
@@ -1045,7 +1121,7 @@ struct Example:
                 ImVec2 pos = ed::GetNodePosition(graph->ID);
                 
                 *out << ind2 << "{\n" << ind3 << "\"id\": " << graph->ID.Get() << ",\n" << ind3 << "\"x\": " << 
-                      pos.x << ",\n" << ind3 << "\"y\": " << pos.y << '\n' << ind2 << "}";
+                        pos.x << ",\n" << ind3 << "\"y\": " << pos.y << '\n' << ind2 << "}";
 
                 if(graph->current != current)
                     *out << ',';
@@ -1054,7 +1130,6 @@ struct Example:
 
                 for(auto c : graph->childs)
                     saveJSON(c, out);
-
             }
         }
             
@@ -1328,7 +1403,7 @@ struct Example:
                 }
 
                 /* Display Links */
-                for (auto& link : m_Links)
+                for(auto& link : m_Links)
                     ed::Link(link.ID, link.StartPinID, link.EndPinID, link.Color, 2.0f);
 
 
@@ -1417,14 +1492,14 @@ struct Example:
 
                         while(ed::QueryDeletedLink(&linkId)) {
                             if(ed::AcceptDeletedItem()) {
-                                auto id = std::find_if(m_Links.begin(), m_Links.end(), [linkId](auto& link) {
-                                    return link.ID == linkId;
-                                });
+                                ed::NodeId nodeId = FindNodeWithPin(FindLink(linkId)->EndPinID)->ID;
                                 
-                                if(id != m_Links.end()) {
-                                    lookupUnlink(graph, &(*id));
-                                    m_Links.erase(id);
-                                }
+                                bool deleted = false;
+
+                                lookupDeleteGraph(graph, nodeId, &deleted);
+
+                                if(!deleted)
+                                    lookupDeleteSecondaryGraph(nodeId, &deleted);
                                
                             }
                         }
@@ -1435,13 +1510,10 @@ struct Example:
                             if(ed::AcceptDeletedItem()) {
                                 bool deleted = false;
                                 
-                                if(nodeId.Get() > 1)
-                                    lookupDeleteGraph(graph, nodeId, &deleted);
+                                lookupDeleteGraph(graph, nodeId, &deleted);
                                 
-                                else
-                                    release();
-
-                                //printNode(graph);
+                                if(!deleted)
+                                    lookupDeleteSecondaryGraph(nodeId, &deleted);
                             }
                         }
                     }
@@ -1540,28 +1612,30 @@ struct Example:
             if(ImGui::BeginPopup("Create New Node")) {
                 auto newNodePostion = openPopupPosition;
 
-                Node* node = nullptr;
-                
-                if(ImGui::MenuItem("Value")) {
-                    char value[100] = "";
-                    if(ImGui::BeginPopup("Value Node Info")) {
-                        ImGui::InputText("Value", value, IM_ARRAYSIZE(value));
-                        ImGui::Spacing();
-                        ImGui::EndPopup();
-                    }
+                ed::NodeId ID = 0;
 
-                    //node = SpawnValueNode(value); 
+                if(ImGui::MenuItem("Value")) {
+                    ID = SpawnValueNode(""); 
                 }
 
                 ImGui::Separator();
 
                 if(ImGui::MenuItem("Attribute"))
-                    //node = SpawnAttributeNode(0, "", NULL);
+                    ID = SpawnAttributeNode(0, "", NULL);
                 ImGui::Separator();
+
+                Node* node = nullptr;
+
+                for(auto n : m_Nodes) {
+                    if(n.ID == ID) {
+                        node = &n;
+                        break;
+                    }
+                }
 
                 if(node) {
                     createSecondaryGraph(node);
-                    BuildNodes();
+                    BuildNode(node);
 
                     createNewNode = false;
 
@@ -1570,11 +1644,11 @@ struct Example:
                     if(auto startPin = newNodeLinkPin) {
                         auto& pins = startPin->Kind == PinKind::Input ? node->Outputs : node->Inputs;
 
-                        for(auto& pin : pins) {
-                            
+                        for(auto& pin : pins)
                             if(CanCreateLink(startPin, &pin)) {
                                 auto endPin = &pin;
-                                if (startPin->Kind == PinKind::Input)
+
+                                if(startPin->Kind == PinKind::Input)
                                     std::swap(startPin, endPin);
 
                                 m_Links.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
@@ -1583,7 +1657,7 @@ struct Example:
 
                                 break;
                             }
-                        }
+
                     }
                 }
 
