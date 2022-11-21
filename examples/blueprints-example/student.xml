@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 
 <MyStudentsData>
-
-    <Student> John </Student>
-
-    <Student> Sean </Student>
-
-    <Student> Sarah </Student>
-
+	<Student student_type="Full-time">
+		<Name>Sean</Name>
+	</Student>
+	<Student student_type="Part-time">
+		<Name>Sarah</Name>
+	</Student>
 </MyStudentsData>

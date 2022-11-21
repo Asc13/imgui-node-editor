@@ -95,11 +95,6 @@ enum class PinKind {
 
 
 enum class NodeType {
-    Blueprint,
-    Simple,
-    Tree,
-    Comment,
-    Houdini,
     Value,
     Element
 };
@@ -132,8 +127,8 @@ struct Node {
     std::string State;
     std::string SavedState;
 
-    Node(int id, string name, ImColor color = ImColor(255, 255, 255)):
-        ID(id), Name(name), Color(color), Type(NodeType::Blueprint), Size(0, 0) {}
+    Node(int id, string name, NodeType type, ImColor color = ImColor(255, 255, 255)):
+        ID(id), Name(name), Color(color), Type(type), Size(0, 0) {}
 };
 
 
@@ -309,7 +304,7 @@ struct Example:
 
 
         ed::NodeId SpawnValueNode(string value) {
-            m_Nodes.emplace_back(GetNextId(), "");
+            m_Nodes.emplace_back(GetNextId(), "", NodeType::Value);
 
             m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
             m_Nodes.back().Inputs.emplace_back(GetNextId(), value, PinType::String);
@@ -319,7 +314,7 @@ struct Example:
 
 
         ed::NodeId SpawnAttributeNode(bool isRoot, string name, const xml_node<>* node) {
-            m_Nodes.emplace_back(GetNextId(), name);
+            m_Nodes.emplace_back(GetNextId(), name, NodeType::Element);
             
             if(!isRoot)
                 m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
@@ -674,14 +669,10 @@ struct Example:
                 case node_element:
                     temp->ID = SpawnAttributeNode(isRoot, node->name(), node);
                     
-                    //imgui_node->Type = NodeType::Element;
-
                     if(flag) {
-                        getPositionFromJSON(temp->ID.Get(), &x, &y);
+                        getPositionFromJSON(graph->current, &x, &y);
                         ed::SetNodePosition(temp->ID, ImVec2(x, y));
                     }
-
-                    //temp->Size = ed::GetNodeSize(imgui_node->ID);
 
                     for(const xml_node<>* n = node->first_node(); n; n = n->next_sibling()) {
                         (*current)++;
@@ -692,14 +683,12 @@ struct Example:
 
                 case node_data:
                     temp->ID = SpawnValueNode(node->value());
-                    //imgui_node->Type = NodeType::Value;
 
                     if(flag) {
-                        getPositionFromJSON(temp->ID.Get(), &x, &y);
+                        getPositionFromJSON(graph->current, &x, &y);
                         ed::SetNodePosition(temp->ID, ImVec2(x, y));
                     }
-
-                    //temp->Size = ed::GetNodeSize(imgui_node->ID);
+                    
                     break;
             }
             
@@ -822,6 +811,8 @@ struct Example:
 
                         else
                             xml_ready = true; 
+
+                        *show = false;
                     }
                 }
             }
@@ -830,6 +821,47 @@ struct Example:
             ImGui::End();
         }
         
+
+        void ShowSave(bool* show = nullptr) {
+            if(!ImGui::Begin("Save", show)) {
+                ImGui::End();
+                return;
+            }
+
+            auto paneWidth = ImGui::GetContentRegionAvail().x;
+
+            auto& editorStyle = ed::GetStyle();
+            ImGui::BeginHorizontal("XMLReader File Chooser", ImVec2(paneWidth + 200, 0), 1.0f);
+            ImGui::TextUnformatted("File name");
+            ImGui::Spring();
+            ImGui::EndHorizontal();
+            ImGui::Spacing();
+            ImGui::BeginHorizontal("File and Save", ImVec2(paneWidth -200, 0), 1.0f);
+            ImGui::InputText("", xml_name, IM_ARRAYSIZE(xml_name));
+            ImGui::Spacing();
+
+            json_name = regex_replace(string(xml_name), regex("xml"), string("json"));
+            
+            if(ImGui::Button("Save") && regex_search(xml_name, regex(".xml"))) {
+                ofstream out {(path + json_name).c_str()};
+                saveJSON(graph, &out);
+                out << "\t]\n}";
+                out.close();
+                out.clear();
+
+                out.open((path + xml_name).c_str());
+                out << "<?xml version=\"1.0\" encoding=\"utf-8\"?>" << endl << endl;
+                saveXML(graph, &out);
+                out.close();
+                out.clear();
+
+                *show = false;
+            }
+
+            ImGui::EndHorizontal();
+            ImGui::End();
+        }
+
 
         void ShowStyleEditor(bool* show = nullptr) {
             if(!ImGui::Begin("Style", show)) {
@@ -905,7 +937,7 @@ struct Example:
 
             paneWidth = ImGui::GetContentRegionAvail().x;
 
-            static bool showStyleEditor = false, showXMLReader = false;
+            static bool showStyleEditor = false, showXMLReader = false, showSave = false;
 
             ImGui::BeginHorizontal("Style Editor", ImVec2(paneWidth, 0));
             ImGui::Spring(0.0f, 0.0f);
@@ -936,13 +968,8 @@ struct Example:
             ImGui::Checkbox("Show Ordinals", &m_ShowOrdinals);
             ImGui::Spring(0.0f);
 
-            if(ImGui::Button("Save") && regex_search(json_name, regex(".json"))) {
-                ofstream out {(path + json_name).c_str()};
-                saveJSON(graph, &out);
-                out << "\t]\n}";
-                out.close();
-                out.clear();
-            }
+            if(ImGui::Button("Save Files"))
+                showSave = true;
 
             ImGui::EndHorizontal();
 
@@ -951,6 +978,9 @@ struct Example:
 
             if(showStyleEditor)
                 ShowStyleEditor(&showStyleEditor);
+
+            if(showSave)
+                ShowSave(&showSave);
 
 
             std::vector<ed::NodeId> selectedNodes;
@@ -1120,7 +1150,7 @@ struct Example:
             if(graph) {
                 ImVec2 pos = ed::GetNodePosition(graph->ID);
                 
-                *out << ind2 << "{\n" << ind3 << "\"id\": " << graph->ID.Get() << ",\n" << ind3 << "\"x\": " << 
+                *out << ind2 << "{\n" << ind3 << "\"id\": " << graph->current << ",\n" << ind3 << "\"x\": " << 
                         pos.x << ",\n" << ind3 << "\"y\": " << pos.y << '\n' << ind2 << "}";
 
                 if(graph->current != current)
@@ -1176,33 +1206,44 @@ struct Example:
             return info;
         }
 
+        
+        bool hasValue(Graph* graph) {
+            if(graph)
+                for(auto c : graph->childs)
+                    if(FindNode(c->ID)->Type == NodeType::Value)
+                        return true;
+
+            return false;
+        }
+
 
         void saveXML(Graph* graph, ofstream* out) {
-            /*if(graph) {
-                Node* temp = graph->node;
+            const auto ind = string(graph->level_x, '\t');
+
+            if(graph) {
+                Node* temp = FindNode(graph->ID);
 
                 if(temp->Type == NodeType::Element) {
-                    *out << "<" << temp->Name;
+                    *out << ind << "<" << temp->Name;
+                    int s = (temp->Inputs).size();
+
+                    if(s < 2)
+                        *out << ">" << (!hasValue(graph) ? "\n" : "");   
                     
-                    for(int i = 1; i < (temp->Inputs).size(); ++i)
-                        *out << " " << ((temp->Inputs).at(i)).Name;
-
-                    if(temp->Inputs.size())
-                        *out << ">" << endl;
-
+                    else
+                        for(int i = ((graph->parent) ? 1 : 0); i < s; i++)
+                            *out << " " << regex_replace(((temp->Inputs).at(i)).Name, regex(" = "), string("=\""))
+                                << (i < (s - 1) ? "\"" : "\">") << ((!hasValue(graph) && !(i < (s - 1))) ? "\n" : "");
                 }
                 else
-                    *out << temp->Name;
-                   
+                    *out << (temp->Inputs).at(1).Name;
+                
                 for(auto c : graph->childs)
                     saveXML(c, out);
-                
-                if((graph->node)->Type == NodeType::Element)
-                    *out << endl;
 
                 if(temp->Type == NodeType::Element)
-                    *out << "</" << temp->Name << ">" << endl;
-            }*/
+                    *out << (!hasValue(graph) ? ind.c_str() : "") << "</" << temp->Name << ">" << endl;
+            }
         }
 
 
@@ -1313,19 +1354,16 @@ struct Example:
 
                 /* Display Nodes */
                 for (auto& node : m_Nodes) {
-                    const auto isSimple = node.Type == NodeType::Simple;
 
                     builder.Begin(node.ID);
 
-                    if (!isSimple) {
-                        builder.Header(node.Color);
-                        ImGui::Spring(0);
-                        ImGui::TextUnformatted(node.Name.c_str());
-                        ImGui::Spring(1);
-                        ImGui::Dummy(ImVec2(0, 28));
-                        ImGui::Spring(0);
-                        builder.EndHeader();
-                    }
+                    builder.Header(node.Color);
+                    ImGui::Spring(0);
+                    ImGui::TextUnformatted(node.Name.c_str());
+                    ImGui::Spring(1);
+                    ImGui::Dummy(ImVec2(0, 28));
+                    ImGui::Spring(0);
+                    builder.EndHeader();
 
                     for (auto& input : node.Inputs) {
                         auto alpha = ImGui::GetStyle().Alpha;
@@ -1352,12 +1390,10 @@ struct Example:
                         builder.EndInput();
                     }
 
-                    if(isSimple) {
-                        builder.Middle();
-                        ImGui::Spring(1, 0);
-                        ImGui::TextUnformatted(node.Name.c_str());
-                        ImGui::Spring(1, 0);
-                    }
+                    builder.Middle();
+                    ImGui::Spring(1, 0);
+                    ImGui::TextUnformatted(node.Name.c_str());
+                    ImGui::Spring(1, 0);
 
                     for (auto& output : node.Outputs) {
                         auto alpha = ImGui::GetStyle().Alpha;
@@ -1554,7 +1590,7 @@ struct Example:
                 
                 if(node) {
                     ImGui::Text("ID: %p", node->ID.AsPointer());
-                    ImGui::Text("Type: %s", node->Type == NodeType::Blueprint ? "Blueprint" : (node->Type == NodeType::Tree ? "Tree" : "Comment"));
+                    ImGui::Text("Type: %s", node->Type == NodeType::Value ? "Value" : "Element");
                     ImGui::Text("Inputs: %d", (int)node->Inputs.size());
                     ImGui::Text("Outputs: %d", (int)node->Outputs.size());
                 }
