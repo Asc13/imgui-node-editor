@@ -7,4 +7,7 @@
 	<Student student_type="Part-time">
 		<Name>Sarah</Name>
 	</Student>
+	<Student student_type="Part-time">
+		<Name>Carl</Name>
+	</Student>
 </MyStudentsData>

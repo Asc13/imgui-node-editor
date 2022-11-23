@@ -73,6 +73,15 @@ char                 xml_name[64] =  "";
 char                 temp_name[64] = "";
 string               json_name;
 string               dtd_file = "";
+
+// -1 -> None   0 -> Value Node   1 -> Element Node
+int                  menuItem = -1;
+char**               attributes;
+int                  attributes_used = 0;
+int                  attributes_size = 1;
+char                 value[200] = "";
+
+
 int                  m_NextId = 1;
 int                  current = 0;
 
@@ -313,14 +322,14 @@ struct Example:
         }
 
 
-        ed::NodeId SpawnAttributeNode(bool isRoot, string name, const xml_node<>* node) {
+        ed::NodeId SpawnElementNode(bool isRoot, string name, vector<string> attributes) {
             m_Nodes.emplace_back(GetNextId(), name, NodeType::Element);
             
             if(!isRoot)
                 m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
 
-            for(const xml_attribute<>* a = node->first_attribute(); a; a = a->next_attribute()) {
-                m_Nodes.back().Inputs.emplace_back(GetNextId(), a->name() + string(" = ") + a->value(), PinType::String);
+            for(auto s : attributes) {
+                m_Nodes.back().Inputs.emplace_back(GetNextId(), s, PinType::String);
             }
 
             m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
@@ -574,7 +583,7 @@ struct Example:
 
                 if(*deleted) {
                     secondaryGraphs.at(i) = NULL;
-                    secondaryGraphs.erase(secondaryGraphs.begin() + i - 1);
+                    secondaryGraphs.erase(secondaryGraphs.begin() + i);
                     break;
                 }
 
@@ -625,6 +634,29 @@ struct Example:
         }
 
 
+        void recalibrateRec(Graph* graph) {
+            if(graph) {
+                
+                graph->current = current;
+
+                for(auto c : graph->childs) {
+                    current++;
+                    recalibrateRec(c);
+                }
+            }
+        }
+
+
+        void recalibrate() {
+            if(graph) {
+                current = 0;
+                recalibrateRec(graph);
+                levels_x.clear();
+                levels_x = levelXOrder(graph);
+            }
+        }
+
+
         void link(Graph* graph, vector<vector<int>> *levels_x) {
             int current = graph->current;
             int parent = (graph->parent) ? (graph->parent)->current : -1;
@@ -664,13 +696,18 @@ struct Example:
 
             bool isRoot = (parent) ? false : true;
             float x, y;
+            vector<string> attributes;
 
             switch(node->type()) {
                 case node_element:
-                    temp->ID = SpawnAttributeNode(isRoot, node->name(), node);
+
+                    for(const xml_attribute<>* a = node->first_attribute(); a; a = a->next_attribute())
+                        attributes.push_back(a->name() + string(" = ") + a->value());
+
+                    temp->ID = SpawnElementNode(isRoot, node->name(), attributes);
                     
                     if(flag) {
-                        getPositionFromJSON(graph->current, &x, &y);
+                        getPositionFromJSON(temp->current, &x, &y);
                         ed::SetNodePosition(temp->ID, ImVec2(x, y));
                     }
 
@@ -685,7 +722,7 @@ struct Example:
                     temp->ID = SpawnValueNode(node->value());
 
                     if(flag) {
-                        getPositionFromJSON(graph->current, &x, &y);
+                        getPositionFromJSON(temp->current, &x, &y);
                         ed::SetNodePosition(temp->ID, ImVec2(x, y));
                     }
                     
@@ -703,6 +740,7 @@ struct Example:
 
 
         void OnStart() override {
+            attributes = (char**) malloc(sizeof(char[200]));
             m_Editor = ed::CreateEditor(NULL);
             ed::SetCurrentEditor(m_Editor);
 
@@ -822,6 +860,105 @@ struct Example:
         }
         
 
+        void ShowNodeCreation(bool* show = nullptr, bool* stay = nullptr, ed::NodeId* ID = nullptr) {
+            if(!ImGui::Begin("Node Creation", show)) {
+                ImGui::End();
+                return;
+            }
+
+            auto paneWidth = ImGui::GetContentRegionAvail().x;
+            vector<string> temp;
+
+            switch(menuItem) {
+                case 0:
+                    ImGui::BeginHorizontal("Value Node Creation", ImVec2(paneWidth + 200, 0), 1.0f);
+                    ImGui::TextUnformatted("Create Value Node");
+                    ImGui::Spring();
+                    ImGui::EndHorizontal();
+                    ImGui::Spacing();
+                    ImGui::BeginHorizontal("Value and Create", ImVec2(paneWidth -200, 0), 1.0f);
+                    ImGui::InputText("", value, IM_ARRAYSIZE(value));
+                    ImGui::Spacing();
+                    
+                    if(!(*stay)) {
+                        *ID = SpawnValueNode(string(value));
+                        strcpy(value, "");
+                        *show = false;
+                    }
+
+                    if(ImGui::Button("Create"))
+                        *stay = false;
+
+                    ImGui::EndHorizontal();
+
+                    break;
+
+                case 1:
+                    ImGui::BeginHorizontal("Element Node Creation", ImVec2(paneWidth + 200, 0), 1.0f);
+                    ImGui::TextUnformatted("Create Element Node");
+                    ImGui::Spring();
+                    ImGui::EndHorizontal();
+                    ImGui::Spacing();
+                    ImGui::BeginHorizontal("Value and Create", ImVec2(paneWidth - 200, 0), 1.0f);
+                    ImGui::InputText("", value, IM_ARRAYSIZE(value));
+                    ImGui::Spacing();
+
+                    if(ImGui::Button("Create"))
+                        *stay = false;
+
+                    ImGui::EndHorizontal();
+
+                    for(int i = 0; i < attributes_used; i++) {
+                        char t[200];
+                        strcpy(t, attributes[i]);
+                        
+                        ImGui::BeginHorizontal(regex_replace(to_string(i), regex("0"), string("Attribute0")).c_str(), ImVec2(paneWidth - 200 * (i + 2), 0), 1.0f);
+                        ImGui::InputText("", t, IM_ARRAYSIZE(t));
+                        ImGui::Spacing();
+                        ImGui::EndHorizontal();
+
+                        attributes[i] = t;
+                    }
+
+                    ImGui::BeginHorizontal("Add Attribute", ImVec2(paneWidth - 200 * (attributes_used + 3), 0), 1.0f);
+
+                    if(ImGui::Button("Add Attribute")) {
+                        if(attributes_used == attributes_size) {
+                            attributes_size *= 2;
+                            attributes = (char**) realloc(attributes, 2 * attributes_size * sizeof(char[200]));
+                        }
+                        attributes[attributes_used++] = (char*) "";
+                    }
+
+                    ImGui::EndHorizontal();
+
+                    if(!(*stay)) {
+                        for(int i = 0; i < attributes_used; ++i) {
+                            temp.push_back(string(attributes[i]));
+                            free(attributes[i]);
+                        }
+
+                        free(attributes);
+
+                        *ID = SpawnElementNode(false, value, temp);
+                        strcpy(value, "");
+
+                        attributes_used = 0;
+                        attributes_size = 1;
+                        attributes = (char**) malloc(sizeof(char[200]));
+
+                        *show = false;
+                    }
+                    break;
+                
+                default:
+                    break;
+            }
+            
+            ImGui::End();
+        }
+
+
         void ShowSave(bool* show = nullptr) {
             if(!ImGui::Begin("Save", show)) {
                 ImGui::End();
@@ -829,8 +966,6 @@ struct Example:
             }
 
             auto paneWidth = ImGui::GetContentRegionAvail().x;
-
-            auto& editorStyle = ed::GetStyle();
             ImGui::BeginHorizontal("XMLReader File Chooser", ImVec2(paneWidth + 200, 0), 1.0f);
             ImGui::TextUnformatted("File name");
             ImGui::Spring();
@@ -948,7 +1083,7 @@ struct Example:
             ImGui::Spring(0.0f);
             
             if(ImGui::Button("Show Flow"))
-                for (auto& link : m_Links)
+                for(auto& link : m_Links)
                     ed::Flow(link.ID);
 
             ImGui::Spring(0.0f);
@@ -1306,6 +1441,7 @@ struct Example:
                 
                 loadXML();
 
+                current = 0;
                 graph = build(root_node, &current, NULL, true);
 
                 levels_x = levelXOrder(graph);
@@ -1318,6 +1454,7 @@ struct Example:
             else if(xml_ready && xml_changed) {
                 loadXML();
 
+                current = 0;
                 graph = build(root_node, &current, NULL, false);
 
                 levels_x = levelXOrder(graph);
@@ -1359,7 +1496,7 @@ struct Example:
 
                     builder.Header(node.Color);
                     ImGui::Spring(0);
-                    ImGui::TextUnformatted(node.Name.c_str());
+                    ImGui::TextUnformatted((node.Type == NodeType::Value) ? "Value" : node.Name.c_str());
                     ImGui::Spring(1);
                     ImGui::Dummy(ImVec2(0, 28));
                     ImGui::Spring(0);
@@ -1389,11 +1526,6 @@ struct Example:
                         ImGui::PopStyleVar();
                         builder.EndInput();
                     }
-
-                    builder.Middle();
-                    ImGui::Spring(1, 0);
-                    ImGui::TextUnformatted(node.Name.c_str());
-                    ImGui::Spring(1, 0);
 
                     for (auto& output : node.Outputs) {
                         auto alpha = ImGui::GetStyle().Alpha;
@@ -1495,7 +1627,6 @@ struct Example:
                                     if(ed::AcceptNewItem(ImColor(128, 255, 128), 4.0f)) {
                                         m_Links.emplace_back(Link(GetNextId(), startPinId, endPinId));
                                         m_Links.back().Color = GetIconColor(startPin->Type);
-                                        lookupLink(graph, &m_Links.back());
                                     }
                                 }
                             }
@@ -1533,6 +1664,7 @@ struct Example:
                                 bool deleted = false;
 
                                 lookupDeleteGraph(graph, nodeId, &deleted);
+                                recalibrate();
 
                                 if(!deleted)
                                     lookupDeleteSecondaryGraph(nodeId, &deleted);
@@ -1547,7 +1679,8 @@ struct Example:
                                 bool deleted = false;
                                 
                                 lookupDeleteGraph(graph, nodeId, &deleted);
-                                
+                                recalibrate();
+
                                 if(!deleted)
                                     lookupDeleteSecondaryGraph(nodeId, &deleted);
                             }
@@ -1559,7 +1692,6 @@ struct Example:
                 ImGui::SetCursorScreenPos(cursorTopLeft);
             }
 
-        # if 1
             auto openPopupPosition = ImGui::GetMousePos();
             ed::Suspend();
             
@@ -1645,67 +1777,68 @@ struct Example:
                 ImGui::EndPopup();
             }
 
+            static bool showNodeCreation = false, stay = true;
+            ed::NodeId ID = 0;
+            Node* node;
+
             if(ImGui::BeginPopup("Create New Node")) {
-                auto newNodePostion = openPopupPosition;
-
-                ed::NodeId ID = 0;
-
                 if(ImGui::MenuItem("Value")) {
-                    ID = SpawnValueNode(""); 
+                    showNodeCreation = true;
+                    menuItem = 0;
                 }
 
                 ImGui::Separator();
 
-                if(ImGui::MenuItem("Attribute"))
-                    ID = SpawnAttributeNode(0, "", NULL);
-                ImGui::Separator();
-
-                Node* node = nullptr;
-
-                for(auto n : m_Nodes) {
-                    if(n.ID == ID) {
-                        node = &n;
-                        break;
-                    }
+                if(ImGui::MenuItem("Element")) {
+                    showNodeCreation = true;
+                    menuItem = 1;
                 }
-
-                if(node) {
-                    createSecondaryGraph(node);
-                    BuildNode(node);
-
-                    createNewNode = false;
-
-                    ed::SetNodePosition(node->ID, newNodePostion);
-
-                    if(auto startPin = newNodeLinkPin) {
-                        auto& pins = startPin->Kind == PinKind::Input ? node->Outputs : node->Inputs;
-
-                        for(auto& pin : pins)
-                            if(CanCreateLink(startPin, &pin)) {
-                                auto endPin = &pin;
-
-                                if(startPin->Kind == PinKind::Input)
-                                    std::swap(startPin, endPin);
-
-                                m_Links.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
-                                m_Links.back().Color = GetIconColor(startPin->Type);
-                                lookupLink(graph, &m_Links.back());
-
-                                break;
-                            }
-
-                    }
-                }
-
+                
                 ImGui::EndPopup();
             }
             else
                 createNewNode = false;
 
-            ImGui::PopStyleVar();
-            ed::Resume();
-        # endif
 
+            if(showNodeCreation) {
+                ShowNodeCreation(&showNodeCreation, &stay, &ID);
+
+                if(!stay && !showNodeCreation) {
+                    node = (ID.Get() > 0) ? FindNode(ID) : NULL;
+
+                    if(node) {
+                        createSecondaryGraph(node);
+                        BuildNode(node);
+
+                        createNewNode = false;
+
+                        ed::SetNodePosition(node->ID, openPopupPosition);
+
+                        if(auto startPin = newNodeLinkPin) {
+                            auto& pins = startPin->Kind == PinKind::Input ? node->Outputs : node->Inputs;
+
+                            for(auto& pin : pins)
+                                if(CanCreateLink(startPin, &pin)) {
+                                    auto endPin = &pin;
+
+                                    if(startPin->Kind == PinKind::Input)
+                                        std::swap(startPin, endPin);
+
+                                    m_Links.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
+                                    m_Links.back().Color = GetIconColor(startPin->Type);
+
+                                    break;
+                                }
+
+                        }
+                    }
+
+                    stay = true;
+                }
+            }
+
+            ed::Resume();
+            ImGui::PopStyleVar();
             ed::End();
 
             auto editorMin = ImGui::GetItemRectMin();
