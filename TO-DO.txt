@@ -1,14 +1,6 @@
 TO-DO:
 
-1. API leitura xml com validação dtd
-
-2. Criação de grafos
-
-    - criar cgrafo se tiver canvas vazio
-    - senao, vai adicionando nodos ao grafos e respetivos links
-    - converter grafo em xml
-    - converter xml e dar para validar
-
-        xml que n existe
-        dtd existente
-        ele vai criando o ficheiro e validando
+1. algum debug no link entre nodos - casos particulares
+2. validar dtd enquanto o grafo e criado
+3. valgrind - memory leaks
+4. melhor algoritmo de disposição dos nodos no ecra

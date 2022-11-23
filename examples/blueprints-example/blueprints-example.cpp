@@ -76,14 +76,14 @@ string               dtd_file = "";
 
 // -1 -> None   0 -> Value Node   1 -> Element Node
 int                  menuItem = -1;
-char**               attributes;
-int                  attributes_used = 0;
-int                  attributes_size = 1;
 char                 value[200] = "";
-
+char                 att[200] = "";
+vector<string>       attributes;
+int                  attributes_used = 0;
 
 int                  m_NextId = 1;
 int                  current = 0;
+bool                 isClear = true;
 
 enum class PinType {
     Flow,
@@ -261,21 +261,40 @@ struct Example:
         }
 
 
-        Node* FindNodeWithPin(ed::PinId id) {
+        Node* FindNodeWithInputPin(ed::PinId id) {
             if(!id)
                 return nullptr;
 
-            for(auto& node : m_Nodes) {
+            for(auto& node : m_Nodes)
                 for(auto& pin : node.Inputs)
                     if(pin.ID == id)
                         return &node;
 
+            return nullptr;
+        }
+
+
+        Node* FindNodeWithOutputPin(ed::PinId id) {
+            if(!id)
+                return nullptr;
+
+            for(auto& node : m_Nodes)
                 for(auto& pin : node.Outputs)
                     if(pin.ID == id)
                         return &node;
-            }
 
             return nullptr;
+        }
+
+
+        void DeleteLinkToPin(ed::PinId id) {
+            int i = 0;
+
+            for(auto& link : m_Links) {
+                if(link.EndPinID == id)
+                    m_Links.erase(m_Links.begin() + i);
+                i++;
+            }
         }
 
 
@@ -411,33 +430,35 @@ struct Example:
 
 
         void readjust(Graph* graph, int max_witdh, int max_heigth, vector<vector<int>>* levels_x) {
-            bool isRoot = (graph->parent) ? false : true;
+            if(graph) {
+                bool isRoot = (graph->parent) ? false : true;
 
-            float tam_max_y = (300.0 * (float) max_witdh);
-            float x, y;
+                float tam_max_y = (300.0 * (float) max_witdh);
+                float x, y;
 
-            if(isRoot) {
-                x = 0.0; y = tam_max_y / 2.0;
+                if(isRoot) {
+                    x = 0.0; y = tam_max_y / 2.0;
+                }
+                else {
+                    x = 400.0 * ((float) graph->level_x); 
+                    y = (tam_max_y / (width(levels_x, graph) + 1.0)) * ((float) graph->level_y + 1.0);
+                }
+
+                ed::SetNodePosition(graph->ID, ImVec2(x, y));
+
+                for(auto n : graph->childs)
+                    readjust(n, max_witdh, max_heigth, levels_x);
             }
-            else {
-                x = 400.0 * ((float) graph->level_x); 
-                y = (tam_max_y / (width(levels_x, graph) + 1.0)) * ((float) graph->level_y + 1.0);
-            }
-
-            ed::SetNodePosition(graph->ID, ImVec2(x, y));
-
-            for(auto n : graph->childs)
-                readjust(n, max_witdh, max_heigth, levels_x);
         }
 
 
-        void lookup(Graph* graph, Graph* res, ed::NodeId ID, bool* found) {
+        void lookup(Graph* graph, Graph** res, ed::NodeId ID, bool* found) {
             if(graph) {
                 if(!(graph->childs).empty())
                     lookup((graph->childs).at(0), res, ID, found);
 
                 if(graph->ID == ID) {
-                    res = graph;
+                    *res = graph;
                     *found = true;
                 }
 
@@ -447,37 +468,54 @@ struct Example:
         }
 
 
-        Graph* getGraphByNode(ed::NodeId ID) {
+        Graph* getGraphByNode(ed::NodeId ID, bool* isPrimary, int* index) {
             Graph* temp = NULL;
             bool found = false;
 
-            lookup(graph, temp, ID, &found);
-            
-            if(found)
+            lookup(graph, &temp, ID, &found);
+
+            if(found) {
+                *isPrimary = true;
                 return temp;
+            }
 
             for(auto g : secondaryGraphs) {
-                lookup(g, temp, ID, &found);
+                lookup(g, &temp, ID, &found);
 
                 if(found)
                     return temp;
+                
+                (*index)++;
             }
 
             return temp;
         }
 
 
-        void lookupLink(Graph* graph, Link* link) {
+        void linkGraphs(ed::PinId startPinId, ed::PinId endPinId, PinType type) {
+            Node *nStart = FindNodeWithOutputPin(startPinId), 
+                 *nEnd = FindNodeWithInputPin(endPinId);
             
+            bool isPrimaryStart, isPrimaryEnd = false;
+            int indexStart = 0, indexEnd = 0;
+
+            Graph *gStart = getGraphByNode(nStart->ID, &isPrimaryStart, &indexStart);
+            Graph *gEnd = getGraphByNode(nEnd->ID, &isPrimaryEnd, &indexEnd);
+
+            if(!isPrimaryEnd && (nStart->Type != NodeType::Value) && !hasValue(gStart) && (gStart != gEnd)) {
+                gEnd->parent = gStart;
+                (gStart->childs).push_back(gEnd);
+
+                m_Links.emplace_back(Link(GetNextId(), startPinId, endPinId));
+                m_Links.back().Color = GetIconColor(type);
+
+                secondaryGraphs.at(indexEnd) = NULL;
+                secondaryGraphs.erase(secondaryGraphs.begin() + indexEnd);
+            }
         }
 
 
-        void lookupUnlink(Graph* graph, Link* link) {
-            
-        }
-
-
-        void createSecondaryGraph(Node* node) {
+        void createGraph(Node* node) {
             Graph* temp = new Graph;
             vector<Graph*> childs;
 
@@ -488,23 +526,35 @@ struct Example:
             temp->childs = childs;
             temp->current = current++;
 
-            secondaryGraphs.push_back(temp);
+            if(isClear && node->Type != NodeType::Value) {
+                graph = temp;          
+                isClear = false;
+            }
+            else
+                secondaryGraphs.push_back(temp);
         }
 
 
         void deleteNodes(Graph* graph) {
             if(graph) {
+                for(auto c : graph->childs)
+                    deleteNodes(c);
+
                 ed::NodeId nodeId = graph->ID;
-                
+
+                Node* node = FindNode(graph->ID);
+
+                for(auto i : node->Inputs)
+                    DeleteLinkToPin(i.ID);
+
                 auto id = find_if(m_Nodes.begin(), m_Nodes.end(), [nodeId](auto& aux) {
                     return aux.ID == nodeId;
                 });
 
-                for(auto c : graph->childs)
-                    deleteNodes(c);
-
                 if(id != m_Nodes.end())
                     m_Nodes.erase(id);
+
+                    
             }
         }
 
@@ -531,13 +581,15 @@ struct Example:
 
 
         Graph* rightSibling(Graph* graph) {
-            int i = 0;
+            if(graph && graph->parent) {
+                int i = 0;
 
-            for(auto c : (graph->parent)->childs) {
-                i++;
+                for(auto c : (graph->parent)->childs) {
+                    i++;
 
-                if(c->ID == graph->ID && i < ((graph->parent)->childs).size())
-                    return ((graph->parent)->childs).at(i);
+                    if(c->ID == graph->ID && i < ((graph->parent)->childs).size())
+                        return ((graph->parent)->childs).at(i);
+                }
             }
 
             return NULL;
@@ -593,6 +645,7 @@ struct Example:
 
 
         void release() {
+            isClear = true;
             current = 0;
             m_NextId = 1;
             m_Nodes.clear();
@@ -740,7 +793,6 @@ struct Example:
 
 
         void OnStart() override {
-            attributes = (char**) malloc(sizeof(char[200]));
             m_Editor = ed::CreateEditor(NULL);
             ed::SetCurrentEditor(m_Editor);
 
@@ -867,7 +919,6 @@ struct Example:
             }
 
             auto paneWidth = ImGui::GetContentRegionAvail().x;
-            vector<string> temp;
 
             switch(menuItem) {
                 case 0:
@@ -894,12 +945,12 @@ struct Example:
                     break;
 
                 case 1:
-                    ImGui::BeginHorizontal("Element Node Creation", ImVec2(paneWidth + 200, 0), 1.0f);
+                    ImGui::BeginHorizontal("Element Node Creation", ImVec2(paneWidth, 0), 1.0f);
                     ImGui::TextUnformatted("Create Element Node");
                     ImGui::Spring();
                     ImGui::EndHorizontal();
                     ImGui::Spacing();
-                    ImGui::BeginHorizontal("Value and Create", ImVec2(paneWidth - 200, 0), 1.0f);
+                    ImGui::BeginHorizontal("Value and Create", ImVec2(paneWidth, 0), 1.0f);
                     ImGui::InputText("", value, IM_ARRAYSIZE(value));
                     ImGui::Spacing();
 
@@ -908,45 +959,33 @@ struct Example:
 
                     ImGui::EndHorizontal();
 
-                    for(int i = 0; i < attributes_used; i++) {
-                        char t[200];
-                        strcpy(t, attributes[i]);
-                        
-                        ImGui::BeginHorizontal(regex_replace(to_string(i), regex("0"), string("Attribute0")).c_str(), ImVec2(paneWidth - 200 * (i + 2), 0), 1.0f);
-                        ImGui::InputText("", t, IM_ARRAYSIZE(t));
-                        ImGui::Spacing();
-                        ImGui::EndHorizontal();
+                    ImGui::Separator();
 
-                        attributes[i] = t;
+                    for(int i = 0; i < attributes_used; i++) {    
+                        ImGui::BeginHorizontal(regex_replace(to_string(i), regex("0"), string("Attribute0")).c_str(), ImVec2(paneWidth, 0), 1.0f);
+                        ImGui::TextUnformatted(attributes.at(i).c_str());
+                        ImGui::Spring();
+                        ImGui::EndHorizontal();
                     }
 
-                    ImGui::BeginHorizontal("Add Attribute", ImVec2(paneWidth - 200 * (attributes_used + 3), 0), 1.0f);
+                    ImGui::BeginHorizontal("Next Attribute", ImVec2(paneWidth, 0), 1.0f);
+                    ImGui::InputText("", att, IM_ARRAYSIZE(att));
+                    ImGui::Spacing();
 
-                    if(ImGui::Button("Add Attribute")) {
-                        if(attributes_used == attributes_size) {
-                            attributes_size *= 2;
-                            attributes = (char**) realloc(attributes, 2 * attributes_size * sizeof(char[200]));
-                        }
-                        attributes[attributes_used++] = (char*) "";
+                    if(ImGui::Button("Add") && regex_search(string(att), regex(".+ = .+"))) {
+                        attributes.push_back(string(att));
+                        attributes_used++;
+                        strcpy(att, "");
                     }
 
                     ImGui::EndHorizontal();
 
                     if(!(*stay)) {
-                        for(int i = 0; i < attributes_used; ++i) {
-                            temp.push_back(string(attributes[i]));
-                            free(attributes[i]);
-                        }
-
-                        free(attributes);
-
-                        *ID = SpawnElementNode(false, value, temp);
+                        *ID = SpawnElementNode(isClear, value, attributes);
                         strcpy(value, "");
-
+                        strcpy(att, "");
                         attributes_used = 0;
-                        attributes_size = 1;
-                        attributes = (char**) malloc(sizeof(char[200]));
-
+                        attributes.clear();
                         *show = false;
                     }
                     break;
@@ -1103,8 +1142,14 @@ struct Example:
             ImGui::Checkbox("Show Ordinals", &m_ShowOrdinals);
             ImGui::Spring(0.0f);
 
-            if(ImGui::Button("Save Files"))
+            if(ImGui::Button(" Save Files "))
                 showSave = true;
+
+            if(ImGui::Button("Readjust"))
+                m_readjust = true;
+
+            if(ImGui::Button("Clear"))
+                m_clear = true;
 
             ImGui::EndHorizontal();
 
@@ -1450,6 +1495,9 @@ struct Example:
 
                 ed::NavigateToContent();
                 config_ready = false;
+                
+                if(graph)
+                    isClear = false;
             }
             else if(xml_ready && xml_changed) {
                 loadXML();
@@ -1465,6 +1513,9 @@ struct Example:
 
                 ed::NavigateToContent();
                 xml_ready = false;
+                
+                if(graph)
+                    isClear = false;
             }
 
             BuildNodes();
@@ -1625,8 +1676,12 @@ struct Example:
                                     showLabel("+ Create Link", ImColor(32, 45, 32, 180));
                                     
                                     if(ed::AcceptNewItem(ImColor(128, 255, 128), 4.0f)) {
-                                        m_Links.emplace_back(Link(GetNextId(), startPinId, endPinId));
-                                        m_Links.back().Color = GetIconColor(startPin->Type);
+                                        printNode(graph);
+                                        cout << secondaryGraphs.size() << endl;
+                                        linkGraphs(startPinId, endPinId, startPin->Type);
+                                        printNode(graph);
+                                        cout << secondaryGraphs.size() << endl;
+                                        
                                     }
                                 }
                             }
@@ -1659,16 +1714,18 @@ struct Example:
 
                         while(ed::QueryDeletedLink(&linkId)) {
                             if(ed::AcceptDeletedItem()) {
-                                ed::NodeId nodeId = FindNodeWithPin(FindLink(linkId)->EndPinID)->ID;
+                                ed::NodeId nodeId = FindNodeWithInputPin(FindLink(linkId)->EndPinID)->ID;
                                 
                                 bool deleted = false;
 
                                 lookupDeleteGraph(graph, nodeId, &deleted);
                                 recalibrate();
 
+                                if(!graph)
+                                    isClear = true;
+
                                 if(!deleted)
                                     lookupDeleteSecondaryGraph(nodeId, &deleted);
-                               
                             }
                         }
 
@@ -1680,6 +1737,9 @@ struct Example:
                                 
                                 lookupDeleteGraph(graph, nodeId, &deleted);
                                 recalibrate();
+                                
+                                if(!graph)
+                                    isClear = true;
 
                                 if(!deleted)
                                     lookupDeleteSecondaryGraph(nodeId, &deleted);
@@ -1807,7 +1867,7 @@ struct Example:
                     node = (ID.Get() > 0) ? FindNode(ID) : NULL;
 
                     if(node) {
-                        createSecondaryGraph(node);
+                        createGraph(node);
                         BuildNode(node);
 
                         createNewNode = false;
@@ -1846,6 +1906,16 @@ struct Example:
 
             if(m_ShowOrdinals)
                 showOrdinals(editorMin, editorMax);
+
+            if(m_readjust) {
+                readjust(graph, maxWidth(&levels_x), height(graph), &levels_x);
+                m_readjust = false;
+            }
+
+            if(m_clear) {
+                release();
+                m_clear = false;
+            }
         }
 
 
@@ -1856,12 +1926,11 @@ struct Example:
         vector<Node>                            m_Nodes;
         vector<Link>                            m_Links;
         vector<vector<int>>                     levels_x;
-        ImTextureID                             m_HeaderBackground = nullptr;
-        ImTextureID                             m_SaveIcon = nullptr;
-        ImTextureID                             m_RestoreIcon = nullptr;
+        ImTextureID                             m_HeaderBackground = nullptr, m_SaveIcon = nullptr, m_RestoreIcon = nullptr;
         const float                             m_TouchTime = 1.0f;
         map<ed::NodeId, float, NodeIdLess>      m_NodeTouchTime;
-        bool                                    m_ShowOrdinals = false;
+        bool                                    m_ShowOrdinals = false, m_readjust = false, m_clear = false;
+
 };
 
 
