@@ -1,11 +1,16 @@
 #include <application.h>
+
+#include "utilities/imfilebrowser.h"
+
 #include "utilities/builders.h"
 #include "utilities/widgets.h"
 
+#include <imgui.h>
 #include <imgui_node_editor.h>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui_internal.h>
+
 
 #include <string>
 #include <vector>
@@ -69,8 +74,8 @@ vector<Graph*>                   secondaryGraphs;
 bool                 xml_ready = false;
 bool                 xml_changed = false;
 bool                 config_ready = false;
-char                 xml_name[64] =  "";
-char                 temp_name[64] = "";
+char                 xml_name[500] =  "";
+char                 temp_name[500] = "";
 string               json_name;
 string               dtd_file = "";
 
@@ -84,6 +89,8 @@ int                  attributes_used = 0;
 int                  m_NextId = 1;
 int                  current = 0;
 bool                 isClear = true;
+bool                 alert = false;
+
 
 enum class PinType {
     Flow,
@@ -127,17 +134,15 @@ struct Pin {
 struct Node {
     ed::NodeId ID;
     std::string Name;
+    bool HasValue;
     std::vector<Pin> Inputs;
     std::vector<Pin> Outputs;
     ImColor Color;
     NodeType Type;
     ImVec2 Size;
 
-    std::string State;
-    std::string SavedState;
-
-    Node(int id, string name, NodeType type, ImColor color = ImColor(255, 255, 255)):
-        ID(id), Name(name), Color(color), Type(type), Size(0, 0) {}
+    Node(int id, string name, bool hasValue, NodeType type, ImColor color = ImColor(255, 255, 255)):
+        ID(id), Name(name), HasValue(hasValue), Color(color), Type(type), Size(0, 0) {}
 };
 
 
@@ -331,25 +336,14 @@ struct Example:
         }
 
 
-        ed::NodeId SpawnValueNode(string value) {
-            m_Nodes.emplace_back(GetNextId(), "", NodeType::Value);
-
-            m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-            m_Nodes.back().Inputs.emplace_back(GetNextId(), value, PinType::String);
-
-            return m_Nodes.back().ID;
-        }
-
-
-        ed::NodeId SpawnElementNode(bool isRoot, string name, vector<string> attributes) {
-            m_Nodes.emplace_back(GetNextId(), name, NodeType::Element);
+        ed::NodeId SpawnElementNode(bool isRoot, string name, vector<string> attributes, bool hasValue) {
+            m_Nodes.emplace_back(GetNextId(), name, hasValue, NodeType::Element);
             
             if(!isRoot)
                 m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
 
-            for(auto s : attributes) {
+            for(auto s : attributes)
                 m_Nodes.back().Inputs.emplace_back(GetNextId(), s, PinType::String);
-            }
 
             m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
 
@@ -384,8 +378,8 @@ struct Example:
                     main.pop();
                     temp.push_back(c->current);
 
-                    for(auto childs : c->childs)
-                        main.push(childs);
+                    for(auto child : c->childs)
+                        main.push(child);
                 }
 
                 levels.push_back(temp);
@@ -502,7 +496,7 @@ struct Example:
             Graph *gStart = getGraphByNode(nStart->ID, &isPrimaryStart, &indexStart);
             Graph *gEnd = getGraphByNode(nEnd->ID, &isPrimaryEnd, &indexEnd);
 
-            if(!isPrimaryEnd && (nStart->Type != NodeType::Value) && !hasValue(gStart) && (gStart != gEnd)) {
+            if(!isPrimaryEnd && (gStart != gEnd)) {
                 gEnd->parent = gStart;
                 (gStart->childs).push_back(gEnd);
 
@@ -648,6 +642,7 @@ struct Example:
             isClear = true;
             current = 0;
             m_NextId = 1;
+            strcpy(temp_name, "");
             m_Nodes.clear();
             m_Links.clear();
             levels_x.clear();
@@ -757,7 +752,9 @@ struct Example:
                     for(const xml_attribute<>* a = node->first_attribute(); a; a = a->next_attribute())
                         attributes.push_back(a->name() + string(" = ") + a->value());
 
-                    temp->ID = SpawnElementNode(isRoot, node->name(), attributes);
+
+                    temp->ID = SpawnElementNode(isRoot, node->name(), attributes,
+                                                node->first_node()->type() == node_element ? false : true);
                     
                     if(flag) {
                         getPositionFromJSON(temp->current, &x, &y);
@@ -765,23 +762,19 @@ struct Example:
                     }
 
                     for(const xml_node<>* n = node->first_node(); n; n = n->next_sibling()) {
-                        (*current)++;
-                        (temp->childs).push_back(build(n, current, temp, flag));
+                        if(n->type() == node_element) {
+                            (*current)++;
+                            temp->childs.push_back(build(n, current, temp, flag));
+                        }
+                        else {
+                            Node* t = FindNode(temp->ID);
+                            t->Inputs.emplace_back(GetNextId(), n->value(), PinType::Function);
+                            t->Outputs.erase(t->Outputs.begin());
+                        }
                     }
 
-                    break;
-
-                case node_data:
-                    temp->ID = SpawnValueNode(node->value());
-
-                    if(flag) {
-                        getPositionFromJSON(temp->current, &x, &y);
-                        ed::SetNodePosition(temp->ID, ImVec2(x, y));
-                    }
-                    
                     break;
             }
-            
             return temp;
         }
 
@@ -795,6 +788,8 @@ struct Example:
         void OnStart() override {
             m_Editor = ed::CreateEditor(NULL);
             ed::SetCurrentEditor(m_Editor);
+            fileDialog.SetTitle("File Browser");
+            fileDialog.Open();
 
             m_HeaderBackground = LoadTexture((path + string("/data/BlueprintBackground.png")).c_str());
             m_SaveIcon         = LoadTexture((path + string("/data/ic_save_white_24dp.png")).c_str());
@@ -803,8 +798,7 @@ struct Example:
 
 
         void OnStop() override {
-            //release();
-
+            fileDialog.Close();
             auto releaseTexture = [this](ImTextureID& id) {
                 if(id) {
                     DestroyTexture(id);
@@ -861,41 +855,37 @@ struct Example:
 
 
         bool fileExists(string name) {
-            ifstream f((path + name).c_str());
+            ifstream f(name.c_str());
             return f.good();
         }
 
 
         void ShowXmlReader(bool* show = nullptr) {
-            if(!ImGui::Begin("XMLReader", show)) {
-                ImGui::End();
+            if(!(*show))
+                return;
+                
+            fileDialog.Display(&alert);
+
+            if(alert) {
+                *show = false;
+                alert = false;
                 return;
             }
 
-            auto paneWidth = ImGui::GetContentRegionAvail().x;
-
-            auto& editorStyle = ed::GetStyle();
-            ImGui::BeginHorizontal("XMLReader File Chooser", ImVec2(paneWidth + 200, 0), 1.0f);
-            ImGui::TextUnformatted("File name");
-            ImGui::Spring();
-            ImGui::EndHorizontal();
-            ImGui::Spacing();
-            ImGui::BeginHorizontal("File and Load", ImVec2(paneWidth -200, 0), 1.0f);
-            ImGui::InputText("", xml_name, IM_ARRAYSIZE(xml_name));
-            ImGui::Spacing();
-
-            json_name = regex_replace(string(xml_name), regex("xml"), string("json"));
-            
-            if(ImGui::Button("Load")) {
+            if(fileDialog.HasSelected()) {
+                strcpy(xml_name, fileDialog.GetSelected().string().c_str());
+                json_name = regex_replace(string(xml_name), regex("xml"), string("json"));
+                
+        
                 if(strcmp(temp_name, xml_name) == 0)
                     xml_changed = false;
+
                 else {
                     xml_changed = true;
                     strcpy(temp_name, xml_name);
                     release();
 
-                    if(fileExists(xml_name) && regex_search(xml_name, regex(".xml"))) {
-
+                    if(regex_search(xml_name, regex(".xml"))) {
                         if(fileExists(json_name) && regex_search(json_name, regex(".json")))
                             config_ready = true;
 
@@ -903,12 +893,10 @@ struct Example:
                             xml_ready = true; 
 
                         *show = false;
+                        fileDialog.ClearSelected();
                     }
                 }
             }
-
-            ImGui::EndHorizontal();
-            ImGui::End();
         }
         
 
@@ -932,7 +920,7 @@ struct Example:
                     ImGui::Spacing();
                     
                     if(!(*stay)) {
-                        *ID = SpawnValueNode(string(value));
+                        //*ID = SpawnValueNode(string(value));
                         strcpy(value, "");
                         *show = false;
                     }
@@ -981,7 +969,7 @@ struct Example:
                     ImGui::EndHorizontal();
 
                     if(!(*stay)) {
-                        *ID = SpawnElementNode(isClear, value, attributes);
+                        *ID = SpawnElementNode(isClear, value, attributes, false);
                         strcpy(value, "");
                         strcpy(att, "");
                         attributes_used = 0;
@@ -999,31 +987,14 @@ struct Example:
 
 
         void ShowSave(bool* show = nullptr) {
-            if(!ImGui::Begin("Save", show)) {
-                ImGui::End();
-                return;
-            }
-
-            auto paneWidth = ImGui::GetContentRegionAvail().x;
-            ImGui::BeginHorizontal("XMLReader File Chooser", ImVec2(paneWidth + 200, 0), 1.0f);
-            ImGui::TextUnformatted("File name");
-            ImGui::Spring();
-            ImGui::EndHorizontal();
-            ImGui::Spacing();
-            ImGui::BeginHorizontal("File and Save", ImVec2(paneWidth -200, 0), 1.0f);
-            ImGui::InputText("", xml_name, IM_ARRAYSIZE(xml_name));
-            ImGui::Spacing();
-
-            json_name = regex_replace(string(xml_name), regex("xml"), string("json"));
-            
-            if(ImGui::Button("Save") && regex_search(xml_name, regex(".xml"))) {
-                ofstream out {(path + json_name).c_str()};
+            if(regex_search(xml_name, regex(".xml"))) {
+                ofstream out {json_name.c_str()};
                 saveJSON(graph, &out);
                 out << "\t]\n}";
                 out.close();
                 out.clear();
 
-                out.open((path + xml_name).c_str());
+                out.open(xml_name);
                 out << "<?xml version=\"1.0\" encoding=\"utf-8\"?>" << endl << endl;
                 saveXML(graph, &out);
                 out.close();
@@ -1031,9 +1002,6 @@ struct Example:
 
                 *show = false;
             }
-
-            ImGui::EndHorizontal();
-            ImGui::End();
         }
 
 
@@ -1092,7 +1060,6 @@ struct Example:
 
             for (int i = 0; i < ed::StyleColor_Count; ++i) {
                 auto name = ed::GetStyleColorName((ed::StyleColor)i);
-                
                 if(!filter.PassFilter(name))
                     continue;
 
@@ -1153,8 +1120,9 @@ struct Example:
 
             ImGui::EndHorizontal();
 
-            if(showXMLReader)
+            if(showXMLReader) {
                 ShowXmlReader(&showXMLReader);
+            }
 
             if(showStyleEditor)
                 ShowStyleEditor(&showStyleEditor);
@@ -1201,7 +1169,14 @@ struct Example:
                 }
 
                 bool isSelected = std::find(selectedNodes.begin(), selectedNodes.end(), node.ID) != selectedNodes.end();
-                if(ImGui::Selectable((node.Name + "##" + std::to_string(reinterpret_cast<uintptr_t>(node.ID.AsPointer()))).c_str(), &isSelected)) {
+                string temp = "";
+
+                if(!node.Inputs.empty()) {
+                    if(node.HasValue)
+                        temp = " - " + node.Inputs.back().Name;
+                }
+
+                if(ImGui::Selectable((node.Name + temp + "##" + std::to_string(reinterpret_cast<uintptr_t>(node.ID.AsPointer()))).c_str(), &isSelected)) {
                     
                     if(io.KeyCtrl) {
                         
@@ -1215,68 +1190,6 @@ struct Example:
 
                     ed::NavigateToSelection();
                 }
-                if(ImGui::IsItemHovered() && !node.State.empty())
-                    ImGui::SetTooltip("State: %s", node.State.c_str());
-
-                auto id = std::string("(") + std::to_string(reinterpret_cast<uintptr_t>(node.ID.AsPointer())) + ")";
-                auto textSize = ImGui::CalcTextSize(id.c_str(), nullptr);
-                auto iconPanelPos = start + ImVec2(
-                    paneWidth - ImGui::GetStyle().FramePadding.x - ImGui::GetStyle().IndentSpacing - saveIconWidth - restoreIconWidth - ImGui::GetStyle().ItemInnerSpacing.x * 1,
-                    (ImGui::GetTextLineHeight() - saveIconHeight) / 2
-                );
-
-                ImGui::GetWindowDrawList()->AddText(
-                    ImVec2(iconPanelPos.x - textSize.x - ImGui::GetStyle().ItemInnerSpacing.x, start.y),
-                    IM_COL32(255, 255, 255, 255), id.c_str(), nullptr
-                );
-
-                auto drawList = ImGui::GetWindowDrawList();
-                ImGui::SetCursorScreenPos(iconPanelPos);
-                ImGui::SetItemAllowOverlap();
-
-                if(node.SavedState.empty()) {
-                    if(ImGui::InvisibleButton("save", ImVec2((float)saveIconWidth, (float)saveIconHeight)))
-                        node.SavedState = node.State;
-
-                    if(ImGui::IsItemActive())
-                        drawList->AddImage(m_SaveIcon, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 96));
-                    
-                    else if(ImGui::IsItemHovered())
-                        drawList->AddImage(m_SaveIcon, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 255));
-                    
-                    else
-                        drawList->AddImage(m_SaveIcon, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 160));
-                }
-                else {
-                    ImGui::Dummy(ImVec2((float)saveIconWidth, (float)saveIconHeight));
-                    drawList->AddImage(m_SaveIcon, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 32));
-                }
-
-                ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-                ImGui::SetItemAllowOverlap();
-                
-                if(!node.SavedState.empty()) {
-                    if (ImGui::InvisibleButton("restore", ImVec2((float)restoreIconWidth, (float)restoreIconHeight))) {
-                        node.State = node.SavedState;
-                        ed::RestoreNodeState(node.ID);
-                        node.SavedState.clear();
-                    }
-
-                    if(ImGui::IsItemActive())
-                        drawList->AddImage(m_RestoreIcon, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 96));
-                    else if(ImGui::IsItemHovered())
-                        drawList->AddImage(m_RestoreIcon, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 255));
-                    else
-                        drawList->AddImage(m_RestoreIcon, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 160));
-                }
-                else {
-                    ImGui::Dummy(ImVec2((float)restoreIconWidth, (float)restoreIconHeight));
-                    drawList->AddImage(m_RestoreIcon, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 32));
-                }
-
-                ImGui::SameLine(0, 0);
-                ImGui::SetItemAllowOverlap();
-                ImGui::Dummy(ImVec2(0, (float)restoreIconHeight));
 
                 ImGui::PopID();
             }
@@ -1345,7 +1258,7 @@ struct Example:
             
 
         vector<tuple<int, float, float>> loadJSON() {
-            ifstream file((path + string(json_name).c_str()));
+            ifstream file(json_name.c_str());
 
             vector<char> buf((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
             buf.push_back('\0');
@@ -1386,16 +1299,6 @@ struct Example:
             return info;
         }
 
-        
-        bool hasValue(Graph* graph) {
-            if(graph)
-                for(auto c : graph->childs)
-                    if(FindNode(c->ID)->Type == NodeType::Value)
-                        return true;
-
-            return false;
-        }
-
 
         void saveXML(Graph* graph, ofstream* out) {
             const auto ind = string(graph->level_x, '\t');
@@ -1403,35 +1306,37 @@ struct Example:
             if(graph) {
                 Node* temp = FindNode(graph->ID);
 
-                if(temp->Type == NodeType::Element) {
-                    *out << ind << "<" << temp->Name;
-                    int s = (temp->Inputs).size();
-
-                    if(s < 2)
-                        *out << ">" << (!hasValue(graph) ? "\n" : "");   
-                    
-                    else
-                        for(int i = ((graph->parent) ? 1 : 0); i < s; i++)
-                            *out << " " << regex_replace(((temp->Inputs).at(i)).Name, regex(" = "), string("=\""))
-                                << (i < (s - 1) ? "\"" : "\">") << ((!hasValue(graph) && !(i < (s - 1))) ? "\n" : "");
-                }
-                else
-                    *out << (temp->Inputs).at(1).Name;
+                *out << ind << "<" << temp->Name;
                 
-                for(auto c : graph->childs)
-                    saveXML(c, out);
+                int s = (temp->Inputs).size();
 
-                if(temp->Type == NodeType::Element)
-                    *out << (!hasValue(graph) ? ind.c_str() : "") << "</" << temp->Name << ">" << endl;
+                if(s < 2 + temp->HasValue)
+                    *out << ">" << (temp->HasValue? "" : "\n");   
+                
+                s -= temp->HasValue;
+
+                for(int i = ((graph->parent) ? 1 : 0); i < s; i++)
+                    *out << " " << regex_replace(((temp->Inputs).at(i)).Name, regex(" = "), string("=\""))
+                        << (i < (s - 1) ? "\"" : "\">") << ((!temp->HasValue && !(i < (s - 1))) ? "\n" : "");
+            
+                if(temp->HasValue)
+                    *out << temp->Inputs.back().Name;
+                
+                else
+                    for(auto c : graph->childs)
+                        saveXML(c, out);
+
+                *out << (temp->HasValue ? "" : ind.c_str()) << "</" << temp->Name << ">" << endl;
             }
         }
 
 
         void loadXML() {
-            ifstream file((path + string(xml_name).c_str()));
+            ifstream file(xml_name);
 
             vector<char> buffer((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
             buffer.push_back('\0');
+
             doc.parse<0>(&buffer[0]);
             
             root_node = doc.first_node();
@@ -1478,6 +1383,9 @@ struct Example:
             UpdateTouch();
 
             auto& io = ImGui::GetIO();
+
+            if(!fileDialog.IsOpened())
+                fileDialog.Open();
             
             ImGui::Text("FPS: %.2f (%.2gms)", io.Framerate, io.Framerate ? 1000.0f / io.Framerate : 0.0f);
 
@@ -1503,6 +1411,7 @@ struct Example:
                 loadXML();
 
                 current = 0;
+
                 graph = build(root_node, &current, NULL, false);
 
                 levels_x = levelXOrder(graph);
@@ -1541,7 +1450,7 @@ struct Example:
                 util::BlueprintNodeBuilder builder(m_HeaderBackground, GetTextureWidth(m_HeaderBackground), GetTextureHeight(m_HeaderBackground));
 
                 /* Display Nodes */
-                for (auto& node : m_Nodes) {
+                for(auto& node : m_Nodes) {
 
                     builder.Begin(node.ID);
 
@@ -1553,7 +1462,8 @@ struct Example:
                     ImGui::Spring(0);
                     builder.EndHeader();
 
-                    for (auto& input : node.Inputs) {
+
+                    for(auto& input : node.Inputs) {
                         auto alpha = ImGui::GetStyle().Alpha;
 
                         if(newLinkPin && !CanCreateLink(newLinkPin, &input) && &input != newLinkPin)
@@ -1566,11 +1476,6 @@ struct Example:
 
                         if(!input.Name.empty()) {
                             ImGui::TextUnformatted(input.Name.c_str());
-                            ImGui::Spring(0);
-                        }
-
-                        if(input.Type == PinType::Bool) {
-                            ImGui::Button("Hello");
                             ImGui::Spring(0);
                         }
 
@@ -1676,12 +1581,7 @@ struct Example:
                                     showLabel("+ Create Link", ImColor(32, 45, 32, 180));
                                     
                                     if(ed::AcceptNewItem(ImColor(128, 255, 128), 4.0f)) {
-                                        printNode(graph);
-                                        cout << secondaryGraphs.size() << endl;
-                                        linkGraphs(startPinId, endPinId, startPin->Type);
-                                        printNode(graph);
-                                        cout << secondaryGraphs.size() << endl;
-                                        
+                                        linkGraphs(startPinId, endPinId, startPin->Type);   
                                     }
                                 }
                             }
@@ -1918,7 +1818,7 @@ struct Example:
             }
         }
 
-
+        ImGui::FileBrowser                      fileDialog;
         xml_document<>                          doc;
         xml_node<>*                             root_node = NULL;
         Graph*                                  graph = NULL;

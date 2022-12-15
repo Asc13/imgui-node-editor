@@ -6,4 +6,5 @@ add_example_executable(blueprints-example
     utilities/builders.cpp
     utilities/drawing.cpp
     utilities/widgets.cpp
+    utilities/imfilebrowser.h
 )
