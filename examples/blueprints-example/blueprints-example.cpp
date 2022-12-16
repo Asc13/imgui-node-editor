@@ -68,19 +68,18 @@ vector<tuple<int, float, float>> json_info;
 
 struct Graph;
 
-vector<Graph*>                   secondaryGraphs;
+vector<Graph*>       secondaryGraphs;
 
 
 bool                 xml_ready = false;
 bool                 xml_changed = false;
 bool                 config_ready = false;
+bool                 dtd_ready = false;
 char                 xml_name[500] =  "";
 char                 temp_name[500] = "";
 string               json_name;
-string               dtd_file = "";
+string               dtd_name;
 
-// -1 -> None   0 -> Value Node   1 -> Element Node
-int                  menuItem = -1;
 char                 value[200] = "";
 char                 att[200] = "";
 vector<string>       attributes;
@@ -111,7 +110,6 @@ enum class PinKind {
 
 
 enum class NodeType {
-    Value,
     Element
 };
 
@@ -157,6 +155,26 @@ struct Link {
     Link(ed::LinkId id, ed::PinId startPinId, ed::PinId endPinId):
         ID(id), StartPinID(startPinId), EndPinID(endPinId), Color(255, 255, 255) {}
 };
+
+
+enum class Category {
+    EMPTY,
+    ANY,
+    TEXT,
+    CHILDS
+};
+
+
+enum class Mode {
+
+};
+
+
+struct Element {
+    string name;
+    vector<string> childs;
+};
+
 
 
 struct NodeIdLess {
@@ -520,7 +538,7 @@ struct Example:
             temp->childs = childs;
             temp->current = current++;
 
-            if(isClear && node->Type != NodeType::Value) {
+            if(isClear) {
                 graph = temp;          
                 isClear = false;
             }
@@ -701,11 +719,13 @@ struct Example:
                 recalibrateRec(graph);
                 levels_x.clear();
                 levels_x = levelXOrder(graph);
+                link(graph, &levels_x, false);
+
             }
         }
 
 
-        void link(Graph* graph, vector<vector<int>> *levels_x) {
+        void link(Graph* graph, vector<vector<int>> *levels_x, bool flag) {
             int current = graph->current;
             int parent = (graph->parent) ? (graph->parent)->current : -1;
             
@@ -719,11 +739,11 @@ struct Example:
 
             graph->level_y = levelYOrder(graph, levels_x);
 
-            if(graph->parent)
+            if(flag && graph->parent)
                 m_Links.push_back(Link(GetNextLinkId(), m_Nodes[parent].Outputs[0].ID, m_Nodes[current].Inputs[0].ID));
 
             for(auto c : graph->childs)
-                link(c, levels_x);
+                link(c, levels_x, flag);
         }
 
 
@@ -734,6 +754,56 @@ struct Example:
                     break;
                 }
         }
+
+
+        void parseElement(char* element) {
+            char* token = strtok(element, " ");
+            char* childToken;
+
+            int i = 0, tam = 0;
+            
+            while(token) {
+                switch(i) {
+                    case 1:
+                        printf("Name: %s\n", token);
+                        break;
+                    
+                    case 2:
+                        tam = strlen(token);
+                        token[tam - 2] = '\0';
+                        parseCategory(token);
+                        
+                        break;
+
+                    default:
+                        break;
+                }
+
+                token = strtok(NULL, " ");
+                i++;
+            }
+        }
+
+        
+        void parseAttributeList(string attributeList) {
+            printf("AttributeList: %s\n", attributeList.c_str());
+        }
+        
+        
+        void createRules() {
+            FILE* fp = fopen(dtd_name.c_str(), "r");
+            char buffer[100];
+
+            while(fgets(buffer, 100, fp)) {
+                if(regex_search(string(buffer), regex("<!ELEMENT")))
+                    parseElement(buffer);
+                
+                else if(regex_search(string(buffer), regex("<!ATTLIST")))
+                    parseAttributeList(buffer);
+
+                //rules.push_back(string(buffer));
+            }
+        };
 
 
         Graph* build(const xml_node<>* node, int *current, Graph* parent, bool flag) {
@@ -875,6 +945,7 @@ struct Example:
             if(fileDialog.HasSelected()) {
                 strcpy(xml_name, fileDialog.GetSelected().string().c_str());
                 json_name = regex_replace(string(xml_name), regex("xml"), string("json"));
+                dtd_name = regex_replace(string(xml_name), regex("xml"), string("dtd"));
                 
         
                 if(strcmp(temp_name, xml_name) == 0)
@@ -886,11 +957,14 @@ struct Example:
                     release();
 
                     if(regex_search(xml_name, regex(".xml"))) {
-                        if(fileExists(json_name) && regex_search(json_name, regex(".json")))
+                        if(fileExists(json_name))
                             config_ready = true;
 
                         else
-                            xml_ready = true; 
+                            xml_ready = true;
+
+                        if(fileExists(dtd_name))
+                            dtd_ready = true;
 
                         *show = false;
                         fileDialog.ClearSelected();
@@ -908,78 +982,48 @@ struct Example:
 
             auto paneWidth = ImGui::GetContentRegionAvail().x;
 
-            switch(menuItem) {
-                case 0:
-                    ImGui::BeginHorizontal("Value Node Creation", ImVec2(paneWidth + 200, 0), 1.0f);
-                    ImGui::TextUnformatted("Create Value Node");
-                    ImGui::Spring();
-                    ImGui::EndHorizontal();
-                    ImGui::Spacing();
-                    ImGui::BeginHorizontal("Value and Create", ImVec2(paneWidth -200, 0), 1.0f);
-                    ImGui::InputText("", value, IM_ARRAYSIZE(value));
-                    ImGui::Spacing();
-                    
-                    if(!(*stay)) {
-                        //*ID = SpawnValueNode(string(value));
-                        strcpy(value, "");
-                        *show = false;
-                    }
+            ImGui::BeginHorizontal("Element Node Creation", ImVec2(paneWidth, 0), 1.0f);
+            ImGui::TextUnformatted("Create Element Node");
+            ImGui::Spring();
+            ImGui::EndHorizontal();
+            ImGui::Spacing();
+            ImGui::BeginHorizontal("Value and Create", ImVec2(paneWidth, 0), 1.0f);
+            ImGui::InputText("", value, IM_ARRAYSIZE(value));
+            ImGui::Spacing();
 
-                    if(ImGui::Button("Create"))
-                        *stay = false;
+            if(ImGui::Button("Create"))
+                *stay = false;
 
-                    ImGui::EndHorizontal();
+            ImGui::EndHorizontal();
 
-                    break;
+            ImGui::Separator();
 
-                case 1:
-                    ImGui::BeginHorizontal("Element Node Creation", ImVec2(paneWidth, 0), 1.0f);
-                    ImGui::TextUnformatted("Create Element Node");
-                    ImGui::Spring();
-                    ImGui::EndHorizontal();
-                    ImGui::Spacing();
-                    ImGui::BeginHorizontal("Value and Create", ImVec2(paneWidth, 0), 1.0f);
-                    ImGui::InputText("", value, IM_ARRAYSIZE(value));
-                    ImGui::Spacing();
+            for(int i = 0; i < attributes_used; i++) {    
+                ImGui::BeginHorizontal(regex_replace(to_string(i), regex("0"), string("Attribute0")).c_str(), ImVec2(paneWidth, 0), 1.0f);
+                ImGui::TextUnformatted(attributes.at(i).c_str());
+                ImGui::Spring();
+                ImGui::EndHorizontal();
+            }
 
-                    if(ImGui::Button("Create"))
-                        *stay = false;
+            ImGui::BeginHorizontal("Next Attribute", ImVec2(paneWidth, 0), 1.0f);
+            ImGui::InputText("", att, IM_ARRAYSIZE(att));
+            ImGui::Spacing();
 
-                    ImGui::EndHorizontal();
+            if(ImGui::Button("Add") && regex_search(string(att), regex(".+ = .+"))) {
+                attributes.push_back(string(att));
+                attributes_used++;
+                strcpy(att, "");
+            }
 
-                    ImGui::Separator();
+            ImGui::EndHorizontal();
 
-                    for(int i = 0; i < attributes_used; i++) {    
-                        ImGui::BeginHorizontal(regex_replace(to_string(i), regex("0"), string("Attribute0")).c_str(), ImVec2(paneWidth, 0), 1.0f);
-                        ImGui::TextUnformatted(attributes.at(i).c_str());
-                        ImGui::Spring();
-                        ImGui::EndHorizontal();
-                    }
-
-                    ImGui::BeginHorizontal("Next Attribute", ImVec2(paneWidth, 0), 1.0f);
-                    ImGui::InputText("", att, IM_ARRAYSIZE(att));
-                    ImGui::Spacing();
-
-                    if(ImGui::Button("Add") && regex_search(string(att), regex(".+ = .+"))) {
-                        attributes.push_back(string(att));
-                        attributes_used++;
-                        strcpy(att, "");
-                    }
-
-                    ImGui::EndHorizontal();
-
-                    if(!(*stay)) {
-                        *ID = SpawnElementNode(isClear, value, attributes, false);
-                        strcpy(value, "");
-                        strcpy(att, "");
-                        attributes_used = 0;
-                        attributes.clear();
-                        *show = false;
-                    }
-                    break;
-                
-                default:
-                    break;
+            if(!(*stay)) {
+                *ID = SpawnElementNode(isClear, value, attributes, false);
+                strcpy(value, "");
+                strcpy(att, "");
+                attributes_used = 0;
+                attributes.clear();
+                *show = false;
             }
             
             ImGui::End();
@@ -1399,13 +1443,18 @@ struct Example:
 
                 levels_x = levelXOrder(graph);
 
-                link(graph, &levels_x);
+                link(graph, &levels_x, true);
 
                 ed::NavigateToContent();
                 config_ready = false;
                 
                 if(graph)
                     isClear = false;
+
+                if(dtd_ready) {
+                    createRules();
+                    dtd_ready = false;
+                }
             }
             else if(xml_ready && xml_changed) {
                 loadXML();
@@ -1416,7 +1465,7 @@ struct Example:
 
                 levels_x = levelXOrder(graph);
 
-                link(graph, &levels_x);
+                link(graph, &levels_x, true);
 
                 readjust(graph, maxWidth(&levels_x), height(graph), &levels_x);
 
@@ -1425,6 +1474,11 @@ struct Example:
                 
                 if(graph)
                     isClear = false;
+
+                if(dtd_ready) {
+                    createRules();
+                    dtd_ready = false;
+                }   
             }
 
             BuildNodes();
@@ -1456,7 +1510,7 @@ struct Example:
 
                     builder.Header(node.Color);
                     ImGui::Spring(0);
-                    ImGui::TextUnformatted((node.Type == NodeType::Value) ? "Value" : node.Name.c_str());
+                    ImGui::TextUnformatted(node.Name.c_str());
                     ImGui::Spring(1);
                     ImGui::Dummy(ImVec2(0, 28));
                     ImGui::Spring(0);
@@ -1581,7 +1635,8 @@ struct Example:
                                     showLabel("+ Create Link", ImColor(32, 45, 32, 180));
                                     
                                     if(ed::AcceptNewItem(ImColor(128, 255, 128), 4.0f)) {
-                                        linkGraphs(startPinId, endPinId, startPin->Type);   
+                                        linkGraphs(startPinId, endPinId, startPin->Type);
+                                        recalibrate();
                                     }
                                 }
                             }
@@ -1682,7 +1737,7 @@ struct Example:
                 
                 if(node) {
                     ImGui::Text("ID: %p", node->ID.AsPointer());
-                    ImGui::Text("Type: %s", node->Type == NodeType::Value ? "Value" : "Element");
+                    ImGui::Text("Type: %s", node->Type == NodeType::Element ? "Element" : "");
                     ImGui::Text("Inputs: %d", (int)node->Inputs.size());
                     ImGui::Text("Outputs: %d", (int)node->Outputs.size());
                 }
@@ -1742,17 +1797,9 @@ struct Example:
             Node* node;
 
             if(ImGui::BeginPopup("Create New Node")) {
-                if(ImGui::MenuItem("Value")) {
-                    showNodeCreation = true;
-                    menuItem = 0;
-                }
 
-                ImGui::Separator();
-
-                if(ImGui::MenuItem("Element")) {
+                if(ImGui::MenuItem("Create"))
                     showNodeCreation = true;
-                    menuItem = 1;
-                }
                 
                 ImGui::EndPopup();
             }
@@ -1784,9 +1831,8 @@ struct Example:
                                     if(startPin->Kind == PinKind::Input)
                                         std::swap(startPin, endPin);
 
-                                    m_Links.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
-                                    m_Links.back().Color = GetIconColor(startPin->Type);
-
+                                    linkGraphs(startPin->ID, endPin->ID, startPin->Type);
+                                    recalibrate();
                                     break;
                                 }
 
@@ -1818,10 +1864,12 @@ struct Example:
             }
         }
 
+
         ImGui::FileBrowser                      fileDialog;
         xml_document<>                          doc;
         xml_node<>*                             root_node = NULL;
         Graph*                                  graph = NULL;
+        vector<string>                          rules;
         const int                               m_PinIconSize = 24;
         vector<Node>                            m_Nodes;
         vector<Link>                            m_Links;
@@ -1830,7 +1878,6 @@ struct Example:
         const float                             m_TouchTime = 1.0f;
         map<ed::NodeId, float, NodeIdLess>      m_NodeTouchTime;
         bool                                    m_ShowOrdinals = false, m_readjust = false, m_clear = false;
-
 };
 
 
