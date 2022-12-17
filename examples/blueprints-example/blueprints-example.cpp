@@ -1,9 +1,10 @@
 #include <application.h>
 
 #include "utilities/imfilebrowser.h"
-
 #include "utilities/builders.h"
 #include "utilities/widgets.h"
+#include "utilities/dtdParser.h"
+
 
 #include <imgui.h>
 #include <imgui_node_editor.h>
@@ -30,7 +31,6 @@
 #include "managers/rapidjson/document.h"
 #include "managers/rapidjson/writer.h"
 #include "managers/rapidjson/stringbuffer.h"
-
 
 
 using namespace std;
@@ -756,6 +756,11 @@ struct Example:
         }
 
 
+        void parseCategory(char* category) {
+
+        }
+
+
         void parseElement(char* element) {
             char* token = strtok(element, " ");
             char* childToken;
@@ -790,19 +795,8 @@ struct Example:
         }
         
         
-        void createRules() {
-            FILE* fp = fopen(dtd_name.c_str(), "r");
-            char buffer[100];
-
-            while(fgets(buffer, 100, fp)) {
-                if(regex_search(string(buffer), regex("<!ELEMENT")))
-                    parseElement(buffer);
-                
-                else if(regex_search(string(buffer), regex("<!ATTLIST")))
-                    parseAttributeList(buffer);
-
-                //rules.push_back(string(buffer));
-            }
+        void createDTD() {
+            parseDocument(document, dtd_name);
         };
 
 
@@ -860,6 +854,7 @@ struct Example:
             ed::SetCurrentEditor(m_Editor);
             fileDialog.SetTitle("File Browser");
             fileDialog.Open();
+            document = initDocument();
 
             m_HeaderBackground = LoadTexture((path + string("/data/BlueprintBackground.png")).c_str());
             m_SaveIcon         = LoadTexture((path + string("/data/ic_save_white_24dp.png")).c_str());
@@ -1452,7 +1447,7 @@ struct Example:
                     isClear = false;
 
                 if(dtd_ready) {
-                    createRules();
+                    createDTD();
                     dtd_ready = false;
                 }
             }
@@ -1476,7 +1471,7 @@ struct Example:
                     isClear = false;
 
                 if(dtd_ready) {
-                    createRules();
+                    createDTD();
                     dtd_ready = false;
                 }   
             }
@@ -1869,7 +1864,7 @@ struct Example:
         xml_document<>                          doc;
         xml_node<>*                             root_node = NULL;
         Graph*                                  graph = NULL;
-        vector<string>                          rules;
+        DocumentDTD                             document = NULL;
         const int                               m_PinIconSize = 24;
         vector<Node>                            m_Nodes;
         vector<Link>                            m_Links;
