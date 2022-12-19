@@ -88,8 +88,6 @@ static vector<vector<string>> getAttributeList(DocumentDTD document, string elem
     vector<vector<string>> result;
     vector<string> temp;
 
-    
-
     for(int i = 0; i < document->attributeListsUsed; i++)
         if(strcmp(document->attributeList[i]->elementName, elementName.c_str()) == 0)
             for(int j = 0; j < document->attributeList[i]->attributesUsed; j++) {
@@ -117,7 +115,7 @@ static void parseAttributeList(DocumentDTD document, char* attributeListString) 
         else {
             addAttribute(attributeList, (char*) tokens.at(i).c_str(), 
                                         (char*) tokens.at(i + 1).c_str(),
-                                        (char*) tokens.at(i + 2).c_str());
+                                        (char*) regex_replace(tokens.at(i + 2), regex("\""), string("")).c_str());
             i += 3;
         }
     }
@@ -185,13 +183,17 @@ static void parseDTD(DocumentDTD document) {
             start = iter + 1;
         }
 
-    vector<vector<string>> t = getAttributeList(document, string("PRODUCT"));
+    vector<string> errors;
+    vector<string> names;
+    vector<string> values;
 
-    for(int i = 0; i < t.size(); i++) {
-        cout << t.at(i).at(0) << endl;
-        cout << t.at(i).at(1) << endl;
-        cout << t.at(i).at(2) << endl << endl;
-    }
+    /*names.push_back("CATEGORY");
+    values.push_back("Table");
+
+    validateAttributes(document, errors, string("PRODUCT"), names, values);
+
+    for(int i = 0; i < errors.size(); i++)
+        cout << errors.at(i) << endl;*/
 }
 
 
@@ -243,17 +245,18 @@ static bool inVectorByName(vector<string> names, string name, vector<string> val
 }
 
 
-vector<string> validateAttributes(DocumentDTD document, string elementName, vector<string> attributeName, vector<string> attributeValue) {
+void validateAttributes(DocumentDTD document, vector<string> & errors, string elementName, vector<string> attributeName, vector<string> attributeValue) {
     vector<vector<string>> temp = getAttributeList(document, elementName);
-    vector<string> errors;
 
     for(int i = 0; i < temp.size(); i++) {
-        if(temp.at(i).at(2).compare("#REQUIRED") == 0 && inVector(attributeName, temp.at(i).at(0)))
+        if(temp.at(i).at(2).compare("#REQUIRED") == 0 && !inVector(attributeName, temp.at(i).at(0))) {
             errors.push_back(temp.at(i).at(0) + string(" its a Required Attribute"));
+        }
 
-        if(regex_match(temp.at(i).at(1), regex("\\((.+|)+\\)")) && inVectorByName(attributeName, temp.at(i).at(0), attributeValue, temp.at(i).at(2)))
+        if(regex_match(temp.at(i).at(1), regex("\\((.+|)+\\)")) && 
+           !inVectorByName(attributeName, temp.at(i).at(0), attributeValue, temp.at(i).at(2)) &&
+           inVector(attributeName, temp.at(i).at(0)))
+
             errors.push_back(temp.at(i).at(0) + string(" should have ") + temp.at(i).at(2) + string(" as a Value"));
     }
-        
-    return errors;
 }

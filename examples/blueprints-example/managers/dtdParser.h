@@ -1,5 +1,5 @@
-#ifndef Parser_H
-#define Parser_H
+#ifndef DTDPARSER_H
+#define DTDPARSER_H
 
 
 #include <stdio.h>
@@ -21,8 +21,12 @@ typedef struct document* DocumentDTD;
 typedef struct element* ElementDTD;
 typedef struct attributeList* AttributeListDTD;
 
+
 DocumentDTD initDocument();
 
 void parseDocument(DocumentDTD document, string path);
+
+void validateAttributes(DocumentDTD document, vector<string> & errors, string elementName, 
+                        vector<string> attributeName, vector<string> attributeValue);
 
 #endif

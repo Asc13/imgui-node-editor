@@ -3,7 +3,7 @@
 #include "utilities/imfilebrowser.h"
 #include "utilities/builders.h"
 #include "utilities/widgets.h"
-#include "utilities/dtdParser.h"
+
 
 
 #include <imgui.h>
@@ -31,6 +31,8 @@
 #include "managers/rapidjson/document.h"
 #include "managers/rapidjson/writer.h"
 #include "managers/rapidjson/stringbuffer.h"
+#include "managers/dtdParser.h"
+#include "managers/configParser.h"
 
 
 using namespace std;
@@ -71,24 +73,26 @@ struct Graph;
 vector<Graph*>       secondaryGraphs;
 
 
-bool                 xml_ready = false;
-bool                 xml_changed = false;
-bool                 config_ready = false;
-bool                 dtd_ready = false;
-char                 xml_name[500] =  "";
-char                 temp_name[500] = "";
-string               json_name;
-string               dtd_name;
+bool                                xml_ready = false;
+bool                                xml_changed = false;
+bool                                json_ready = false;
+bool                                dtd_ready = false;
+bool                                config_ready = false;
+char                                xml_name[500] =  "";
+char                                temp_name[500] = "";
+string                              json_name;
+string                              dtd_name;
+string                              config_name;
 
-char                 value[200] = "";
-char                 att[200] = "";
-vector<string>       attributes;
-int                  attributes_used = 0;
+char                                value[200] = "";
+char                                att[200] = "";
+vector<tuple<string, string>>       attributes;
+int                                 attributes_used = 0;
 
-int                  m_NextId = 1;
-int                  current = 0;
-bool                 isClear = true;
-bool                 alert = false;
+int                                 m_NextId = 1;
+int                                 current = 0;
+bool                                isClear = true;
+bool                                alert = false;
 
 
 enum class PinType {
@@ -354,17 +358,62 @@ struct Example:
         }
 
 
-        ed::NodeId SpawnElementNode(bool isRoot, string name, vector<string> attributes, bool hasValue) {
+        PinType typeMap(string type) {
+            if(type.compare("Bool") == 0)
+                return PinType::Bool;
+            
+            if(type.compare("Int") == 0)
+                return PinType::Int;
+
+            if(type.compare("Float") == 0)
+                return PinType::Float;
+            
+            if(type.compare("Double") == 0)
+                return PinType::Float;
+            
+            if(type.compare("String") == 0)
+                return PinType::String;
+
+            else
+                return PinType::Object;
+        }
+
+
+        tuple<string, string, bool> searchAttribute(string name, vector<tuple<string, string, bool>> map) {
+            tuple<string, string, bool> result;
+
+            for(int i = 0; i < map.size(); i++)
+                if(name.compare(get<0>(map.at(i))) == 0)
+                    return map.at(i);
+
+            return result;
+        }
+
+
+        ed::NodeId SpawnElementNode(bool isRoot, string name, vector<tuple<string, string, bool>> map, 
+                                    vector<tuple<string, string>> attributes, bool hasValue) {
+
             m_Nodes.emplace_back(GetNextId(), name, hasValue, NodeType::Element);
+            tuple<string, string, bool> temp;
             
             if(!isRoot)
                 m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-
-            for(auto s : attributes)
-                m_Nodes.back().Inputs.emplace_back(GetNextId(), s, PinType::String);
-
+            
             m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
 
+            if(!map.empty())
+                for(auto s : attributes) {
+                    temp = searchAttribute(get<0>(s), map);
+
+                    if(get<2>(temp))
+                        m_Nodes.back().Inputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), typeMap(get<1>(temp)));
+                    
+                    else
+                        m_Nodes.back().Outputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), typeMap(get<1>(temp)));
+                }
+            else
+                for(auto s : attributes)
+                    m_Nodes.back().Inputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), PinType::String);
             
             return m_Nodes.back().ID;
         }
@@ -664,6 +713,7 @@ struct Example:
             m_Nodes.clear();
             m_Links.clear();
             levels_x.clear();
+            errors.clear();
 
             for(auto g : secondaryGraphs)
                 delete g;
@@ -676,6 +726,10 @@ struct Example:
                 doc.clear();
                 root_node = NULL;
             }
+
+            deleteConfigs(configs);
+            dtd_ready = false;
+            config_ready = false;
         }
 
 
@@ -789,15 +843,10 @@ struct Example:
             }
         }
 
-        
-        void parseAttributeList(string attributeList) {
-            printf("AttributeList: %s\n", attributeList.c_str());
+
+        void parseConfig() {
+
         }
-        
-        
-        void createDTD() {
-            parseDocument(document, dtd_name);
-        };
 
 
         Graph* build(const xml_node<>* node, int *current, Graph* parent, bool flag) {
@@ -808,17 +857,17 @@ struct Example:
 
             bool isRoot = (parent) ? false : true;
             float x, y;
-            vector<string> attributes;
+            vector<tuple<string, string>> attributes;
 
             switch(node->type()) {
                 case node_element:
 
                     for(const xml_attribute<>* a = node->first_attribute(); a; a = a->next_attribute())
-                        attributes.push_back(a->name() + string(" = ") + a->value());
+                        attributes.push_back(make_tuple(a->name(), a->value()));
 
 
-                    temp->ID = SpawnElementNode(isRoot, node->name(), attributes,
-                                                node->first_node()->type() == node_element ? false : true);
+                    temp->ID = SpawnElementNode(isRoot, node->name(), getAttributesTypes(configs, node->name()),
+                                                attributes, node->first_node()->type() == node_element ? false : true);
                     
                     if(flag) {
                         getPositionFromJSON(temp->current, &x, &y);
@@ -855,6 +904,7 @@ struct Example:
             fileDialog.SetTitle("File Browser");
             fileDialog.Open();
             document = initDocument();
+            configs = initConfigs();
 
             m_HeaderBackground = LoadTexture((path + string("/data/BlueprintBackground.png")).c_str());
             m_SaveIcon         = LoadTexture((path + string("/data/ic_save_white_24dp.png")).c_str());
@@ -941,7 +991,7 @@ struct Example:
                 strcpy(xml_name, fileDialog.GetSelected().string().c_str());
                 json_name = regex_replace(string(xml_name), regex("xml"), string("json"));
                 dtd_name = regex_replace(string(xml_name), regex("xml"), string("dtd"));
-                
+                config_name = regex_replace(string(xml_name), regex("xml"), string("cfg"));
         
                 if(strcmp(temp_name, xml_name) == 0)
                     xml_changed = false;
@@ -953,13 +1003,16 @@ struct Example:
 
                     if(regex_search(xml_name, regex(".xml"))) {
                         if(fileExists(json_name))
-                            config_ready = true;
+                            json_ready = true;
 
                         else
                             xml_ready = true;
 
                         if(fileExists(dtd_name))
                             dtd_ready = true;
+
+                        if(fileExists(config_name))
+                            config_ready = true;
 
                         *show = false;
                         fileDialog.ClearSelected();
@@ -995,7 +1048,7 @@ struct Example:
 
             for(int i = 0; i < attributes_used; i++) {    
                 ImGui::BeginHorizontal(regex_replace(to_string(i), regex("0"), string("Attribute0")).c_str(), ImVec2(paneWidth, 0), 1.0f);
-                ImGui::TextUnformatted(attributes.at(i).c_str());
+                ImGui::TextUnformatted((get<0>(attributes.at(i)) + get<1>(attributes.at(i))).c_str());
                 ImGui::Spring();
                 ImGui::EndHorizontal();
             }
@@ -1004,16 +1057,21 @@ struct Example:
             ImGui::InputText("", att, IM_ARRAYSIZE(att));
             ImGui::Spacing();
 
+            vector<string> tempAtt;
+
             if(ImGui::Button("Add") && regex_search(string(att), regex(".+ = .+"))) {
-                attributes.push_back(string(att));
+                tempAtt = split(att, regex(".+ = .+"));
+                attributes.push_back(make_tuple(tempAtt.at(0), tempAtt.at(1)));
                 attributes_used++;
                 strcpy(att, "");
             }
 
             ImGui::EndHorizontal();
 
+            vector<tuple<string, string, bool>> map;
+
             if(!(*stay)) {
-                *ID = SpawnElementNode(isClear, value, attributes, false);
+                *ID = SpawnElementNode(isClear, value, map, attributes, false);
                 strcpy(value, "");
                 strcpy(att, "");
                 attributes_used = 0;
@@ -1244,6 +1302,62 @@ struct Example:
             );
 
             ImGui::Spacing(); ImGui::SameLine();
+            ImGui::TextUnformatted("Graph validation");
+            
+            if(errors.empty() && dtd_ready) {
+                auto start = ImGui::GetCursorScreenPos();
+
+                if(config_ready) {
+                    ImGui::GetWindowDrawList()->AddLine(
+                        start + ImVec2(paneWidth, 0),
+                        start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
+                        IM_COL32(255, 0, 0, 0), 4.0f);
+                    
+                    ImGui::TextUnformatted("Config sucessfully validated!!");
+                }
+
+                start = ImGui::GetCursorScreenPos();
+
+                ImGui::GetWindowDrawList()->AddLine(
+                        start + ImVec2(paneWidth, 0),
+                        start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
+                        IM_COL32(255, 0, 0, 0), 4.0f);
+
+                ImGui::TextUnformatted("Graph sucessfully validated!!");
+            }
+
+            else {
+                if(config_ready) {
+                    auto start = ImGui::GetCursorScreenPos();
+
+                    ImGui::GetWindowDrawList()->AddLine(
+                        start + ImVec2(paneWidth, 0),
+                        start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
+                        IM_COL32(255, 0, 0, 0), 4.0f);
+                    
+                    ImGui::TextUnformatted("Config sucessfully validated!!");
+                }
+
+                for(int i = 0; i < errors.size(); i++) {
+                    auto start = ImGui::GetCursorScreenPos();
+
+                    ImGui::GetWindowDrawList()->AddLine(
+                        start + ImVec2(paneWidth, 0),
+                        start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
+                        IM_COL32(255, 0, 0, 255 - (int)(255 * i)), 4.0f);
+
+                    ImGui::TextUnformatted(errors.at(i).c_str());
+                
+                }
+            }
+
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                ImGui::GetCursorScreenPos(),
+                ImGui::GetCursorScreenPos() + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
+                ImColor(ImGui::GetStyle().Colors[ImGuiCol_HeaderActive]), ImGui::GetTextLineHeight() * 0.25f
+            );
+
+            ImGui::Spacing(); ImGui::SameLine();
             ImGui::TextUnformatted("Selection");
 
             ImGui::BeginHorizontal("Selection Stats", ImVec2(paneWidth, 0));
@@ -1428,8 +1542,11 @@ struct Example:
             
             ImGui::Text("FPS: %.2f (%.2gms)", io.Framerate, io.Framerate ? 1000.0f / io.Framerate : 0.0f);
 
-            if(config_ready && xml_changed) {
+            if(json_ready && xml_changed) {
                 json_info = loadJSON();
+
+                if(config_ready)
+                    config_ready = loadConfig(configs, config_name, errors);
                 
                 loadXML();
 
@@ -1441,17 +1558,19 @@ struct Example:
                 link(graph, &levels_x, true);
 
                 ed::NavigateToContent();
-                config_ready = false;
+                json_ready = false;
                 
                 if(graph)
                     isClear = false;
 
-                if(dtd_ready) {
-                    createDTD();
-                    dtd_ready = false;
-                }
+                if(dtd_ready)
+                    parseDocument(document, dtd_name);
+
             }
             else if(xml_ready && xml_changed) {
+                if(config_ready)
+                    config_ready = loadConfig(configs, config_name, errors);
+
                 loadXML();
 
                 current = 0;
@@ -1470,10 +1589,9 @@ struct Example:
                 if(graph)
                     isClear = false;
 
-                if(dtd_ready) {
-                    createDTD();
-                    dtd_ready = false;
-                }   
+                if(dtd_ready)
+                    parseDocument(document, dtd_name);
+
             }
 
             BuildNodes();
@@ -1865,6 +1983,8 @@ struct Example:
         xml_node<>*                             root_node = NULL;
         Graph*                                  graph = NULL;
         DocumentDTD                             document = NULL;
+        Configs                                 configs = NULL;
+        vector<string>                          errors;
         const int                               m_PinIconSize = 24;
         vector<Node>                            m_Nodes;
         vector<Link>                            m_Links;
