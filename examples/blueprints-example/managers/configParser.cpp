@@ -140,11 +140,16 @@ static string getType(Config config) {
 }
 
 
-static bool compareConfig(Config config, char* name, bool* hasInput, bool* hasOuput) {
-    if(strcmp(name, config->element) == 0) {
-        *hasInput = strcmp("_", config->attribute) != 0;
-        *hasOuput = strcmp("_", config->pointer) != 0;
-
+static bool compareConfig(Config config, char* name, bool flag, bool* IO) {
+    if(flag && strcmp(name, config->element) == 0 && 
+               strcmp("_", config->attribute) != 0) {
+        *IO = true;
+        return true;
+    }
+    
+    if(!flag && strcmp(name, config->pointerElement) == 0 && 
+                strcmp("_", config->pointer) != 0) {
+        *IO = false;
         return true;
     }
 
@@ -170,16 +175,17 @@ static void insertConfig(Configs configs, string typeS, string element, string p
 
 vector<tuple<string, string, bool>> getAttributesTypes(Configs configs, string elementName) {
     vector<tuple<string, string, bool>> result;
-    bool hasInput, hasOuput;
+    bool IO;
     
-    for(int i = 0; i < configs->used; i++)
-        if(compareConfig(configs->configs[i], (char*) elementName.c_str(), &hasInput, &hasOuput)) {
-            if(hasInput)    
-                result.push_back(make_tuple(getInput(configs->configs[i]), getType(configs->configs[i]), true));
+    for(int i = 0; i < configs->used; i++) {
+        if(compareConfig(configs->configs[i], (char*) elementName.c_str(), true, &IO))
+            result.push_back(make_tuple((IO ? getInput(configs->configs[i]) : getOutput(configs->configs[i])), 
+                                         getType(configs->configs[i]), IO));
 
-            if(hasOuput)
-                result.push_back(make_tuple(getOutput(configs->configs[i]), getType(configs->configs[i]), false));
-        }
+        if(compareConfig(configs->configs[i], (char*) elementName.c_str(), false, &IO))
+            result.push_back(make_tuple((IO ? getInput(configs->configs[i]) : getOutput(configs->configs[i])), 
+                                         getType(configs->configs[i]), IO));
+    }
 
     return result;
 };
@@ -211,6 +217,7 @@ void deleteConfigs(Configs configs) {
 static bool validateConfig(vector<vector<string>> tokens, vector<string> & errors) {
     ConfigType type;
     string pointer;
+    vector<tuple<string, string>> combinations;
 
     for(int i = 0; i < tokens.size(); i++) {
         if(tokens.at(i).size() != 5) {
@@ -225,26 +232,32 @@ static bool validateConfig(vector<vector<string>> tokens, vector<string> & error
             return false;
         }
 
-        for(int j = 1; tokens.size(); j++) {
-            if((tokens.at(i).at(1) + tokens.at(i).at(2)).compare("__") != 0 &&
-               (((tokens.at(i).at(1) + tokens.at(i).at(2)).compare(tokens.at(j).at(1) + tokens.at(j).at(2)) == 0 || 
-                (tokens.at(i).at(1) + tokens.at(i).at(2)).compare(tokens.at(j).at(3) + tokens.at(j).at(4)) == 0))) {
-                    
-                errors.push_back(string("Config error: Attribute repeated in lines ") + to_string(i + 1) + 
-                                string(" and ") + to_string(j + 1) + string(".\n"));
-                return false;
-            }
+        
+        for(int j = 0; j < tokens.size(); j++) {
+            if(j == i)
+                continue;
 
-            if((tokens.at(i).at(3) + tokens.at(i).at(4)).compare("__") != 0 &&
-               (((tokens.at(i).at(3) + tokens.at(i).at(4)).compare(tokens.at(j).at(1) + tokens.at(j).at(2)) == 0 ||
-                (tokens.at(i).at(3) + tokens.at(i).at(4)).compare(tokens.at(j).at(3) + tokens.at(j).at(4)) == 0))) {
-                    
-                errors.push_back(string("Config error: Attribute repeated in lines ") + to_string(i + 1) + 
-                                    string(" and ") + to_string(j + 1) + string(".\n"));
+            if((tokens.at(i).at(1) + tokens.at(i).at(2)).compare(string("__")) != 0 && 
+               (((tokens.at(i).at(1) + tokens.at(i).at(2)).compare((tokens.at(j).at(1) + tokens.at(j).at(2))) == 0) || 
+               ((tokens.at(i).at(1) + tokens.at(i).at(2)).compare((tokens.at(j).at(3) + tokens.at(j).at(4))) == 0))) {
+
+                errors.push_back(string("Config error: In Attribute repeated in lines ") + to_string(i + 1) + 
+                                 string(" and ") + to_string(j + 1) + string(".\n"));
             
                 return false;
             }
-        }   
+
+            
+            if((tokens.at(i).at(3) + tokens.at(i).at(4)).compare(string("__")) != 0 && 
+               (((tokens.at(i).at(3) + tokens.at(i).at(4)).compare((tokens.at(j).at(1) + tokens.at(j).at(2))) == 0) || 
+               ((tokens.at(i).at(3) + tokens.at(i).at(4)).compare((tokens.at(j).at(3) + tokens.at(j).at(4))) == 0))) {
+                
+                errors.push_back(string("Config error: Out Attribute repeated in lines ") + to_string(i + 1) + 
+                                 string(" and ") + to_string(j + 1) + string(".\n"));
+            
+                return false;
+            }
+        }
     }
 
     return true;
@@ -262,9 +275,9 @@ bool loadConfig(Configs configs, string path, vector<string> & errors) {
 
     if(!validateConfig(tokens, errors))
         return false;
-    
+
     for(int i = 0; i < tokens.size(); i++)
-        insertConfig(configs, tokens.at(i).at(0), tokens.at(i).at(1), tokens.at(i).at(2), tokens.at(i).at(3), tokens.at(i).at(4));
+        insertConfig(configs, tokens.at(i).at(0), tokens.at(i).at(1), tokens.at(i).at(3), tokens.at(i).at(2), tokens.at(i).at(4));
 
     return true;
 }

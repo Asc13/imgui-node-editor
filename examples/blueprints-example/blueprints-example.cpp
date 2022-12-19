@@ -400,16 +400,19 @@ struct Example:
                 m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
             
             m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
-
+            
             if(!map.empty())
                 for(auto s : attributes) {
                     temp = searchAttribute(get<0>(s), map);
 
+                    //cout << get<0>(temp) << " " << get<1>(temp) << " " << get<2>(temp) << endl;
+
                     if(get<2>(temp))
                         m_Nodes.back().Inputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), typeMap(get<1>(temp)));
                     
-                    else
+                    else {
                         m_Nodes.back().Outputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), typeMap(get<1>(temp)));
+                    }
                 }
             else
                 for(auto s : attributes)
@@ -1659,25 +1662,6 @@ struct Example:
                         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
                         builder.Output(output.ID);
 
-                        if(output.Type == PinType::String) {
-                            static char buffer[128] = "Edit Me\nMultiline!";
-                            static bool wasActive = false;
-
-                            ImGui::PushItemWidth(100.0f);
-                            ImGui::InputText("##edit", buffer, 127);
-                            ImGui::PopItemWidth();
-                          
-                            if (ImGui::IsItemActive() && !wasActive) {
-                                ed::EnableShortcuts(false);
-                                wasActive = true;
-                            }
-
-                            else if (!ImGui::IsItemActive() && wasActive) {
-                                ed::EnableShortcuts(true);
-                                wasActive = false;
-                            }
-                            ImGui::Spring(0);
-                        }
 
                         if (!output.Name.empty()) {
                             ImGui::Spring(0);
