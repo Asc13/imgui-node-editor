@@ -125,6 +125,11 @@ static void printConfig(Config config) {
 }
 
 
+static bool isLink(Config config) {
+    return (strcmp(config->attribute, "_") != 0 && strcmp(config->pointer, "_") != 0); 
+}
+
+
 static string getInput(Config config) {
     return string(config->attribute);
 }
@@ -180,11 +185,11 @@ vector<tuple<string, string, bool>> getAttributesTypes(Configs configs, string e
     for(int i = 0; i < configs->used; i++) {
         if(compareConfig(configs->configs[i], (char*) elementName.c_str(), true, &IO))
             result.push_back(make_tuple((IO ? getInput(configs->configs[i]) : getOutput(configs->configs[i])), 
-                                         getType(configs->configs[i]), IO));
+                                         getType(configs->configs[i]), !isLink(configs->configs[i]) ? IO : !IO));
 
         if(compareConfig(configs->configs[i], (char*) elementName.c_str(), false, &IO))
             result.push_back(make_tuple((IO ? getInput(configs->configs[i]) : getOutput(configs->configs[i])), 
-                                         getType(configs->configs[i]), IO));
+                                         getType(configs->configs[i]), !isLink(configs->configs[i]) ? IO : !IO));
     }
 
     return result;
@@ -261,6 +266,25 @@ static bool validateConfig(vector<vector<string>> tokens, vector<string> & error
     }
 
     return true;
+}
+
+
+vector<vector<string>> getLinks(Configs configs) {
+    vector<vector<string>> links;
+    vector<string> temp;
+
+    for(int i = 0; i < configs->used; i++)
+        if(isLink(configs->configs[i])) {
+            temp.push_back(configs->configs[i]->element);
+            temp.push_back(configs->configs[i]->attribute);
+            temp.push_back(configs->configs[i]->pointerElement);
+            temp.push_back(configs->configs[i]->pointer);
+            temp.push_back(getType(configs->configs[i]));
+            links.push_back(temp);
+            temp.clear();
+        }
+
+    return links;
 }
 
 

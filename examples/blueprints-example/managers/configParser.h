@@ -30,6 +30,8 @@ void deleteConfigs(Configs configs);
 
 void parseConfig(Configs configs, string path);
 
+vector<vector<string>> getLinks(Configs configs);
+
 bool loadConfig(Configs configs, string path, vector<string> & errors);
 
 #endif

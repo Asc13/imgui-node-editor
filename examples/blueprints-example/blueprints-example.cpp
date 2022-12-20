@@ -261,10 +261,16 @@ struct Example:
         }
 
 
-        Link* FindLink(ed::LinkId id) {
+        Link* FindLink(ed::LinkId id, bool* isAttribute) {
             for(auto& link : m_Links)
                 if(link.ID == id)
                     return &link;
+
+            for(auto& link : m_AttributeLinks)
+                if(link.ID == id) {
+                    *isAttribute = true;
+                    return &link;
+                }
 
             return nullptr;
         }
@@ -314,12 +320,40 @@ struct Example:
         }
 
 
+        void FindPinByAttritbute(Graph* graph, string element, string attribute, Pin** pin, bool IO, bool* found) {
+            if(graph) {
+                Node* node = FindNode(graph->ID);
+
+                if(element.compare(node->Name) == 0) {
+                    for(auto& p : (IO ? node->Inputs : node->Outputs))
+                        if(regex_search(p.Name, regex(attribute))) {
+                            *pin = &p;
+                            *found = true;
+                        }
+                }
+
+                if(!(*found))
+                    for(auto & c : graph->childs)
+                        FindPinByAttritbute(c, element, attribute, pin, IO, found);
+
+            }
+        }
+
+
         void DeleteLinkToPin(ed::PinId id) {
             int i = 0;
 
             for(auto& link : m_Links) {
                 if(link.EndPinID == id)
                     m_Links.erase(m_Links.begin() + i);
+                i++;
+            }
+
+            i = 0;
+
+            for(auto& link : m_AttributeLinks) {
+                if(link.EndPinID == id)
+                    m_AttributeLinks.erase(m_AttributeLinks.begin() + i);
                 i++;
             }
         }
@@ -330,6 +364,10 @@ struct Example:
                 return false;
 
             for(auto& link : m_Links)
+                if(link.StartPinID == id || link.EndPinID == id)
+                    return true;
+
+            for(auto& link : m_AttributeLinks)
                 if(link.StartPinID == id || link.EndPinID == id)
                     return true;
 
@@ -404,8 +442,6 @@ struct Example:
             if(!map.empty())
                 for(auto s : attributes) {
                     temp = searchAttribute(get<0>(s), map);
-
-                    //cout << get<0>(temp) << " " << get<1>(temp) << " " << get<2>(temp) << endl;
 
                     if(get<2>(temp))
                         m_Nodes.back().Inputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), typeMap(get<1>(temp)));
@@ -610,15 +646,13 @@ struct Example:
 
                 for(auto i : node->Inputs)
                     DeleteLinkToPin(i.ID);
-
+                
                 auto id = find_if(m_Nodes.begin(), m_Nodes.end(), [nodeId](auto& aux) {
                     return aux.ID == nodeId;
                 });
 
                 if(id != m_Nodes.end())
-                    m_Nodes.erase(id);
-
-                    
+                    m_Nodes.erase(id);                 
             }
         }
 
@@ -715,6 +749,7 @@ struct Example:
             strcpy(temp_name, "");
             m_Nodes.clear();
             m_Links.clear();
+            m_AttributeLinks.clear();
             levels_x.clear();
             errors.clear();
 
@@ -782,6 +817,24 @@ struct Example:
         }
 
 
+        void linkAttributes(Graph* graph) {
+            vector<vector<string>> configLinks = getLinks(configs);
+            Pin* startPin;
+            Pin* endPin;
+            bool found = false;
+
+
+            for(auto& t : configLinks) {
+                FindPinByAttritbute(graph, t.at(0), t.at(1), &startPin, false, &found);
+                found = false; 
+                FindPinByAttritbute(graph, t.at(2), t.at(3), &endPin, true, &found);
+
+                m_AttributeLinks.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
+                m_AttributeLinks.back().Color = GetIconColor(typeMap(t.at(4)));
+            }
+        }
+
+
         void link(Graph* graph, vector<vector<int>> *levels_x, bool flag) {
             int current = graph->current;
             int parent = (graph->parent) ? (graph->parent)->current : -1;
@@ -796,8 +849,10 @@ struct Example:
 
             graph->level_y = levelYOrder(graph, levels_x);
 
-            if(flag && graph->parent)
-                m_Links.push_back(Link(GetNextLinkId(), m_Nodes[parent].Outputs[0].ID, m_Nodes[current].Inputs[0].ID));
+            if(flag && graph->parent) {
+                m_Links.emplace_back(Link(GetNextLinkId(), m_Nodes[parent].Outputs[0].ID, m_Nodes[current].Inputs[0].ID));
+                m_Links.back().Color = GetIconColor(PinType::Flow);
+            }
 
             for(auto c : graph->childs)
                 link(c, levels_x, flag);
@@ -810,45 +865,6 @@ struct Example:
                     *x = get<1>(n); *y = get<2>(n);
                     break;
                 }
-        }
-
-
-        void parseCategory(char* category) {
-
-        }
-
-
-        void parseElement(char* element) {
-            char* token = strtok(element, " ");
-            char* childToken;
-
-            int i = 0, tam = 0;
-            
-            while(token) {
-                switch(i) {
-                    case 1:
-                        printf("Name: %s\n", token);
-                        break;
-                    
-                    case 2:
-                        tam = strlen(token);
-                        token[tam - 2] = '\0';
-                        parseCategory(token);
-                        
-                        break;
-
-                    default:
-                        break;
-                }
-
-                token = strtok(NULL, " ");
-                i++;
-            }
-        }
-
-
-        void parseConfig() {
-
         }
 
 
@@ -1188,9 +1204,13 @@ struct Example:
 
             ImGui::Spring(0.0f);
             
-            if(ImGui::Button("Show Flow"))
+            if(ImGui::Button("Show Flow")) {
                 for(auto& link : m_Links)
                     ed::Flow(link.ID);
+            
+                for(auto& link : m_AttributeLinks)
+                    ed::Flow(link.ID);
+            }
 
             ImGui::Spring(0.0f);
 
@@ -1378,9 +1398,13 @@ struct Example:
 
             ImGui::Unindent();
 
-            if(ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Z)))
+            if(ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Z))) {
                 for(auto& link : m_Links)
                     ed::Flow(link.ID);
+
+                for(auto& link : m_AttributeLinks)
+                    ed::Flow(link.ID);
+            }
 
             if(ed::HasSelectionChanged())
                 ++changeCount;
@@ -1559,6 +1583,7 @@ struct Example:
                 levels_x = levelXOrder(graph);
 
                 link(graph, &levels_x, true);
+                linkAttributes(graph);
 
                 ed::NavigateToContent();
                 json_ready = false;
@@ -1583,6 +1608,7 @@ struct Example:
                 levels_x = levelXOrder(graph);
 
                 link(graph, &levels_x, true);
+                linkAttributes(graph);
 
                 readjust(graph, maxWidth(&levels_x), height(graph), &levels_x);
 
@@ -1681,6 +1707,9 @@ struct Example:
                 for(auto& link : m_Links)
                     ed::Link(link.ID, link.StartPinID, link.EndPinID, link.Color, 2.0f);
 
+                for(auto& link : m_AttributeLinks)
+                    ed::Link(link.ID, link.StartPinID, link.EndPinID, link.Color, 2.0f);
+
 
                 if(!createNewNode) {
                     
@@ -1732,8 +1761,14 @@ struct Example:
                                     showLabel("+ Create Link", ImColor(32, 45, 32, 180));
                                     
                                     if(ed::AcceptNewItem(ImColor(128, 255, 128), 4.0f)) {
-                                        linkGraphs(startPinId, endPinId, startPin->Type);
-                                        recalibrate();
+                                        if(startPin->Type == PinType::Flow && endPin->Type == PinType::Flow) {
+                                            linkGraphs(startPinId, endPinId, startPin->Type);
+                                            recalibrate();
+                                        }
+                                        else {
+                                            m_AttributeLinks.emplace_back(Link(GetNextId(), startPinId, endPinId));
+                                            m_AttributeLinks.back().Color = GetIconColor(startPin->Type);
+                                        }
                                     }
                                 }
                             }
@@ -1766,18 +1801,25 @@ struct Example:
 
                         while(ed::QueryDeletedLink(&linkId)) {
                             if(ed::AcceptDeletedItem()) {
-                                ed::NodeId nodeId = FindNodeWithInputPin(FindLink(linkId)->EndPinID)->ID;
-                                
-                                bool deleted = false;
+                                bool isAtt = false;
+                                Link* link = FindLink(linkId, &isAtt);
 
-                                lookupDeleteGraph(graph, nodeId, &deleted);
-                                recalibrate();
+                                if(!isAtt) {
+                                    ed::NodeId nodeId = FindNodeWithInputPin(link->EndPinID)->ID;
+                                    
+                                    bool deleted = false;
 
-                                if(!graph)
-                                    isClear = true;
+                                    lookupDeleteGraph(graph, nodeId, &deleted);
+                                    recalibrate();
 
-                                if(!deleted)
-                                    lookupDeleteSecondaryGraph(nodeId, &deleted);
+                                    if(!graph)
+                                        isClear = true;
+
+                                    if(!deleted)
+                                        lookupDeleteSecondaryGraph(nodeId, &deleted);
+                                }
+                                else
+                                    DeleteLinkToPin(link->EndPinID);
                             }
                         }
 
@@ -1868,7 +1910,8 @@ struct Example:
             }
 
             if(ImGui::BeginPopup("Link Context Menu")) {
-                auto link = FindLink(contextLinkId);
+                bool isAtt = false;
+                auto link = FindLink(contextLinkId, &isAtt);
 
                 ImGui::TextUnformatted("Link Context Menu");
                 ImGui::Separator();
@@ -1928,8 +1971,11 @@ struct Example:
                                     if(startPin->Kind == PinKind::Input)
                                         std::swap(startPin, endPin);
 
-                                    linkGraphs(startPin->ID, endPin->ID, startPin->Type);
-                                    recalibrate();
+                                    if(startPin->Type == PinType::Flow && endPin->Type == PinType::Flow) {
+                                        linkGraphs(startPin->ID, endPin->ID, startPin->Type);
+                                        recalibrate();
+                                    }
+                                    
                                     break;
                                 }
 
@@ -1972,6 +2018,7 @@ struct Example:
         const int                               m_PinIconSize = 24;
         vector<Node>                            m_Nodes;
         vector<Link>                            m_Links;
+        vector<Link>                            m_AttributeLinks;
         vector<vector<int>>                     levels_x;
         ImTextureID                             m_HeaderBackground = nullptr, m_SaveIcon = nullptr, m_RestoreIcon = nullptr;
         const float                             m_TouchTime = 1.0f;
