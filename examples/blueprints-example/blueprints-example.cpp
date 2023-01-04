@@ -78,6 +78,7 @@ bool                                xml_changed = false;
 bool                                json_ready = false;
 bool                                dtd_ready = false;
 bool                                config_ready = false;
+bool                                valid = true;
 char                                xml_name[500] =  "";
 char                                temp_name[500] = "";
 string                              json_name;
@@ -159,26 +160,6 @@ struct Link {
     Link(ed::LinkId id, ed::PinId startPinId, ed::PinId endPinId):
         ID(id), StartPinID(startPinId), EndPinID(endPinId), Color(255, 255, 255) {}
 };
-
-
-enum class Category {
-    EMPTY,
-    ANY,
-    TEXT,
-    CHILDS
-};
-
-
-enum class Mode {
-
-};
-
-
-struct Element {
-    string name;
-    vector<string> childs;
-};
-
 
 
 struct NodeIdLess {
@@ -819,10 +800,10 @@ struct Example:
 
         void linkAttributes(Graph* graph) {
             vector<vector<string>> configLinks = getLinks(configs);
+                
             Pin* startPin;
             Pin* endPin;
             bool found = false;
-
 
             for(auto& t : configLinks) {
                 FindPinByAttritbute(graph, t.at(0), t.at(1), &startPin, false, &found);
@@ -865,6 +846,33 @@ struct Example:
                     *x = get<1>(n); *y = get<2>(n);
                     break;
                 }
+        }
+
+
+        void validateGraph(Graph* graph) {
+            vector<string> names;
+            vector<string> values;
+            vector<tuple<string, string>> nameValue;
+            vector<string> tokens;
+            Node* node;
+
+            if(graph) {
+                node = FindNode(graph->ID);
+
+                for(int i = 1; i < node->Inputs.size() - (node->HasValue ? 1 : 0); ++i) {
+                    tokens = split(node->Inputs.at(i).Name, regex(" = "));
+                    names.push_back(tokens.at(0));
+                    values.push_back(tokens.at(1));
+                    nameValue.push_back(make_tuple(tokens.at(0), tokens.at(1)));
+                }
+
+                validateAttributes(document, errors, node->Name, names, values, &valid);
+                validateAttributesByElement(configs, node->Name, nameValue, errors, &valid);
+
+                for(auto & c: graph->childs)
+                    validateGraph(c);
+            }
+
         }
 
 
@@ -1334,7 +1342,8 @@ struct Example:
                     ImGui::GetWindowDrawList()->AddLine(
                         start + ImVec2(paneWidth, 0),
                         start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
-                        IM_COL32(255, 0, 0, 0), 4.0f);
+                        IM_COL32(0, 0, 0, 0), 4.0f);
+                    
                     
                     ImGui::TextUnformatted("Config sucessfully validated!!");
                 }
@@ -1344,9 +1353,10 @@ struct Example:
                 ImGui::GetWindowDrawList()->AddLine(
                         start + ImVec2(paneWidth, 0),
                         start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
-                        IM_COL32(255, 0, 0, 0), 4.0f);
+                        IM_COL32(0, 0, 0, 0), 4.0f);
 
-                ImGui::TextUnformatted("Graph sucessfully validated!!");
+                if(valid)
+                    ImGui::TextUnformatted("Graph sucessfully validated!!");
             }
 
             else {
@@ -1356,20 +1366,20 @@ struct Example:
                     ImGui::GetWindowDrawList()->AddLine(
                         start + ImVec2(paneWidth, 0),
                         start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
-                        IM_COL32(255, 0, 0, 0), 4.0f);
+                        IM_COL32(0, 0, 0, 0), 4.0f);
                     
                     ImGui::TextUnformatted("Config sucessfully validated!!");
                 }
 
-                for(int i = 0; i < errors.size(); i++) {
+                for(set<string>::iterator it = errors.begin(); it != errors.end(); ++it) {
                     auto start = ImGui::GetCursorScreenPos();
 
                     ImGui::GetWindowDrawList()->AddLine(
                         start + ImVec2(paneWidth, 0),
                         start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
-                        IM_COL32(255, 0, 0, 255 - (int)(255 * i)), 4.0f);
+                        IM_COL32(0, 0, 0, 255 - (int)(255)), 4.0f);
 
-                    ImGui::TextUnformatted(errors.at(i).c_str());
+                    ImGui::TextUnformatted(string(*it).c_str());
                 
                 }
             }
@@ -1594,6 +1604,9 @@ struct Example:
                 if(dtd_ready)
                     parseDocument(document, dtd_name);
 
+                if(dtd_ready && config_ready)
+                    validateGraph(graph);
+
             }
             else if(xml_ready && xml_changed) {
                 if(config_ready)
@@ -1620,6 +1633,9 @@ struct Example:
 
                 if(dtd_ready)
                     parseDocument(document, dtd_name);
+
+                if(dtd_ready && config_ready)
+                    validateGraph(graph);
 
             }
 
@@ -2014,7 +2030,7 @@ struct Example:
         Graph*                                  graph = NULL;
         DocumentDTD                             document = NULL;
         Configs                                 configs = NULL;
-        vector<string>                          errors;
+        set<string>                             errors;
         const int                               m_PinIconSize = 24;
         vector<Node>                            m_Nodes;
         vector<Link>                            m_Links;

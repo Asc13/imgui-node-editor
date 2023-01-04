@@ -10,9 +10,18 @@ struct document {
 };
 
 
+struct rule {
+    char** childs;
+    int childsUsed, childsSize;
+    char rule; // , or | or _
+    char regex; // * or + or ? or _
+};
+
+
 struct element {
-    char* tagName;
-    char* ruleType;
+    char* elementName;
+    RuleDTD* rules;
+    int rulesUsed, rulesSize;
 };
 
 
@@ -54,14 +63,84 @@ static AttributeListDTD initAttributeList() {
 }
 
 
-static ElementDTD initElement() {
+static RuleDTD initRule(char r, char rgx) {
+    RuleDTD rule = (RuleDTD) malloc(sizeof(struct rule));
+
+    rule->childsUsed = 0;
+    rule->childsSize = 1;
+    rule->rule = r;
+    rule->regex = rgx;
+
+    return rule;
+}
+
+
+static void addRule(RuleDTD rule, char* child) {
+    if(rule->childsUsed == 0)
+        rule->childs = (char**) malloc(sizeof(char*));
+
+    else if(rule->childsUsed == rule->childsSize) {
+        rule->childsSize *= 2;
+        rule->childs = (char**) realloc(rule->childs, rule->childsSize * sizeof(char*));
+    }
+    
+    rule->childs[rule->childsUsed++] = strdup(child);
+}
+
+
+static ElementDTD initElement(char* elementName) {
     ElementDTD element = (ElementDTD) malloc(sizeof(struct element));
+
+    element->rulesUsed = 0;
+    element->rulesSize = 1;
+    element->elementName = strdup(elementName);
+
     return element;
 }
 
 
+static void addElementRule(ElementDTD element, RuleDTD rule) {
+    if(element->rulesUsed == 0)
+        element->rules = (RuleDTD*) malloc(sizeof(RuleDTD));
+
+    else if(element->rulesUsed == element->rulesSize) {
+        element->rulesSize *= 2;
+        element->rules = (RuleDTD*) realloc(element->rules, element->rulesSize * sizeof(RuleDTD));
+    }
+    
+    element->rules[element->rulesUsed++] = rule;
+}
+
+
+static void parseChilds(ElementDTD element, string childs) {
+    vector<string> tokens;
+
+    if(childs.compare("EMPTY") == 0)
+        addElementRule(element, initRule('E', '_'));
+
+    else if(childs.compare("ANY") == 0)
+        addElementRule(element, initRule('A', '_'));
+    
+    else if(regex_match(childs, regex("\\([^\\|,]+(\\|[^\\|,]+)+\\)[*|+|?]?"))) {
+        tokens = split(childs, regex("\\(|\\||\\)"));
+        
+        string last = tokens.back();
+
+        for(int i = 0; i < tokens.size() - 1; ++i)
+            addElementRule(element, initRule('|', (char) last.at(0)));          
+    }
+
+    else if(regex_match(childs, regex("\\([^\\|,]+(,[^\\|,]+)*\\)"))) {
+        tokens = split(childs, regex("\\(|,|\\)"));
+    }
+}
+
+
 static void parseElement(DocumentDTD document, char* elementString) {
-    char* token = strtok(elementString, " ");
+    vector<string> tokens = split(string(elementString), regex("(\\s+|\n+|>)"));
+
+    ElementDTD element = initElement((char*) tokens.at(1).c_str());
+    parseChilds(element, tokens.at(2));
 }
 
 
@@ -104,7 +183,6 @@ static vector<vector<string>> getAttributeList(DocumentDTD document, string elem
 
 
 static void parseAttributeList(DocumentDTD document, char* attributeListString) {
-    int used = 0, size = 1;
     vector<string> tokens = split(string(attributeListString), regex("(\\s+|\n+|>)"));
 
     AttributeListDTD attributeList = initAttributeList();
@@ -130,6 +208,7 @@ static void parseAttributeList(DocumentDTD document, char* attributeListString) 
 
     document->attributeList[document->attributeListsUsed++] = attributeList;
 }
+
 
 static void printAttributeList(DocumentDTD document) {
     for(int i = 0; i < document->attributeListsUsed; i++) {
@@ -183,17 +262,11 @@ static void parseDTD(DocumentDTD document) {
             start = iter + 1;
         }
 
-    vector<string> errors;
-    vector<string> names;
-    vector<string> values;
+    if(regex_search(string(start), regex("!ELEMENT")))
+        parseElement(document, start);
 
-    /*names.push_back("CATEGORY");
-    values.push_back("Table");
-
-    validateAttributes(document, errors, string("PRODUCT"), names, values);
-
-    for(int i = 0; i < errors.size(); i++)
-        cout << errors.at(i) << endl;*/
+    if(regex_search(string(start), regex("!ATTLIST")))
+        parseAttributeList(document, start);
 }
 
 
@@ -245,18 +318,20 @@ static bool inVectorByName(vector<string> names, string name, vector<string> val
 }
 
 
-void validateAttributes(DocumentDTD document, vector<string> & errors, string elementName, vector<string> attributeName, vector<string> attributeValue) {
+void validateAttributes(DocumentDTD document, set<string> & errors, string elementName, vector<string> attributeName, vector<string> attributeValue, bool* ok) {
     vector<vector<string>> temp = getAttributeList(document, elementName);
 
     for(int i = 0; i < temp.size(); i++) {
         if(temp.at(i).at(2).compare("#REQUIRED") == 0 && !inVector(attributeName, temp.at(i).at(0))) {
-            errors.push_back(temp.at(i).at(0) + string(" its a Required Attribute"));
+            errors.insert(temp.at(i).at(0) + string(" its a Required Attribute"));
+            *ok = false;
         }
 
         if(regex_match(temp.at(i).at(1), regex("\\((.+|)+\\)")) && 
            !inVectorByName(attributeName, temp.at(i).at(0), attributeValue, temp.at(i).at(2)) &&
            inVector(attributeName, temp.at(i).at(0)))
 
-            errors.push_back(temp.at(i).at(0) + string(" should have ") + temp.at(i).at(2) + string(" as a Value"));
+            errors.insert(temp.at(i).at(0) + string(" should have ") + temp.at(i).at(2) + string(" as a Value"));
+            *ok = false;
     }
 }

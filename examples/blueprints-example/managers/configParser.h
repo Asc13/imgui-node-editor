@@ -30,8 +30,10 @@ void deleteConfigs(Configs configs);
 
 void parseConfig(Configs configs, string path);
 
+void validateAttributesByElement(Configs configs, string elementName, vector<tuple<string, string>> nameValue, set<string> & errors, bool* ok);
+
 vector<vector<string>> getLinks(Configs configs);
 
-bool loadConfig(Configs configs, string path, vector<string> & errors);
+bool loadConfig(Configs configs, string path, set<string> & errors);
 
 #endif

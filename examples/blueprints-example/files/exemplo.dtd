@@ -15,7 +15,7 @@ PARTNUM CDATA #IMPLIED
 PLANT (Pittsburgh|Milwaukee|Chicago) "Chicago"
 INVENTORY (InStock|Backordered|Discontinued) "InStock">
 
-<!ELEMENT SPECIFICATIONS (#PCDATA)>
+<!ELEMENT SPECIFICATIONS EMPTY>
 <!ATTLIST SPECIFICATIONS
 WEIGHT CDATA #IMPLIED
 POWER CDATA #IMPLIED>
@@ -26,7 +26,7 @@ FINISH (Metal|Polished|Matte) "Matte"
 ADAPTER (Included|Optional|NotApplicable) "Included"
 CASE (HardShell|Soft|NotApplicable) "HardShell">
 
-<!ELEMENT PRICE (#PCDATA)>
+<!ELEMENT PRICE (#PCDATA|OPTIONS)*>
 <!ATTLIST PRICE
 MSRP CDATA #IMPLIED
 WHOLESALE CDATA #IMPLIED

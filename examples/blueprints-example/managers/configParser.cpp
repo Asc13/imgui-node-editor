@@ -23,6 +23,7 @@ struct config {
     char* pointerElement;
     char* attribute;
     char* pointer;
+    char* rule;
 };
 
 
@@ -94,7 +95,7 @@ static string asString(ConfigType type) {
     }
 }
 
-static Config initConfig(ConfigType type, char* element, char* pointerElement, char* attribute, char* pointer) {
+static Config initConfig(ConfigType type, char* element, char* pointerElement, char* attribute, char* pointer, char* rule) {
     Config config = (Config) malloc(sizeof(struct config));
 
     config->type = type;
@@ -102,6 +103,7 @@ static Config initConfig(ConfigType type, char* element, char* pointerElement, c
     config->pointerElement = strdup(pointerElement);
     config->attribute = strdup(attribute);
     config->pointer = strdup(pointer);
+    config->rule = strdup(rule);
 
     return config;
 }
@@ -112,6 +114,7 @@ static void deleteConfig(Config config) {
     free(config->pointerElement);
     free(config->attribute);
     free(config->pointer);
+    free(config->rule);
     free(config);
 }
 
@@ -121,7 +124,8 @@ static void printConfig(Config config) {
     cout << config->element << endl;
     cout << config->pointerElement << endl;
     cout << config->attribute << endl;
-    cout << config->pointer << endl << endl;
+    cout << config->pointer << endl;
+    cout << config->rule << endl << endl;
 }
 
 
@@ -162,7 +166,8 @@ static bool compareConfig(Config config, char* name, bool flag, bool* IO) {
 }
 
 
-static void insertConfig(Configs configs, string typeS, string element, string pointerElement, string attribute, string pointer) {
+static void insertConfig(Configs configs, string typeS, string element, string pointerElement, string attribute, 
+                         string pointer, string rule) {
     ConfigType type = typeMap(typeS);
 
     if(configs->used == 0)
@@ -174,7 +179,73 @@ static void insertConfig(Configs configs, string typeS, string element, string p
     }
 
     configs->configs[configs->used++] = initConfig(type, (char*) element.c_str(), (char*) pointerElement.c_str(),
-                                                   (char*) attribute.c_str(), (char*) pointer.c_str());
+                                                   (char*) attribute.c_str(), (char*) pointer.c_str(),
+                                                   (char*) rule.c_str());
+}
+
+
+static void validateValue(Config config, string value, string element, string attribute, set<string> & errors, bool* ok) {
+    if(strcmp(config->rule, "_") == 0)
+        return;
+
+    if(config->type == ConfigType::String && stoi(string(config->rule)) < value.size()) {
+        errors.insert(string("String size must be lower or equal to " + string(config->rule) + 
+                                " on attribute " + attribute + " from " +  element + " Node!"));
+        *ok = false;     
+        return;
+    }
+
+    vector<string> ruleFields;
+
+    if(config->type == ConfigType::Int) {
+        ruleFields = split(string(config->rule), regex(","));
+
+        if(ruleFields.at(0).at(0) == '[' && stoi(value) < stoi(ruleFields.at(0).substr(1)) ||
+          (ruleFields.at(0).at(0) == ']' && stoi(value) <= stoi(ruleFields.at(0).substr(1))) ||
+          (ruleFields.at(1).back() == '['&& stoi(value) >= stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
+          (ruleFields.at(1).back() == ']' && stoi(value) > stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
+
+            errors.insert(string("Int don't respect the interval " + string(config->rule) +
+                                    " on attribute " + attribute + " from " +  element + " Node!"));
+            *ok = false;
+        }
+
+        return;
+    }
+    
+    if(config->type == ConfigType::Float || config->type == ConfigType::Double) {
+        ruleFields = split(string(config->rule), regex(","));
+
+        if(ruleFields.at(0).at(0) == '[' && stof(value) < stof(ruleFields.at(0).substr(1)) ||
+          (ruleFields.at(0).at(0) == ']' && stof(value) <= stof(ruleFields.at(0).substr(1))) ||
+          (ruleFields.at(1).back() == '['&& stof(value) >= stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
+          (ruleFields.at(1).back() == ']' && stof(value) > stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
+
+            errors.insert(string(asString(config->type) + " don't respect the interval " + string(config->rule) +
+                                    " on attribute " + attribute + " from " +  element + " Node!"));
+            *ok = false;
+        }
+        return;
+    }
+}
+
+
+static void validateAttributes(Config config, vector<tuple<string, string>> nameValue, string element, set<string> & errors, bool* ok) {
+    for(auto & vt : nameValue)
+            if(strcmp(config->attribute, (char*) get<0>(vt).c_str()) == 0 ||
+               strcmp(config->pointer, (char*) get<0>(vt).c_str()) == 0)
+                validateValue(config, get<1>(vt), element, get<0>(vt), errors, ok);
+}
+
+
+void validateAttributesByElement(Configs configs, string elementName, vector<tuple<string, string>> nameValue, set<string> & errors, bool* ok) {
+    for(int i = 0; i < configs->used; i++) {
+        if(strcmp(configs->configs[i]->element, (char*) elementName.c_str()) == 0)
+            validateAttributes(configs->configs[i], nameValue, elementName, errors, ok);
+
+        if(strcmp(configs->configs[i]->pointerElement, (char*) elementName.c_str()) == 0)
+            validateAttributes(configs->configs[i], nameValue, elementName, errors, ok);
+    }
 }
 
 
@@ -193,7 +264,7 @@ vector<tuple<string, string, bool>> getAttributesTypes(Configs configs, string e
     }
 
     return result;
-};
+}
 
 
 Configs initConfigs() {
@@ -219,20 +290,20 @@ void deleteConfigs(Configs configs) {
 }
 
 
-static bool validateConfig(vector<vector<string>> tokens, vector<string> & errors) {
+static bool validateConfig(vector<vector<string>> tokens, set<string> & errors) {
     ConfigType type;
     string pointer;
     vector<tuple<string, string>> combinations;
 
     for(int i = 0; i < tokens.size(); i++) {
-        if(tokens.at(i).size() != 5) {
-            errors.push_back(string("Config error: Wrong number of fields in line ") + 
+        if(tokens.at(i).size() != 6) {
+            errors.insert(string("Config error: Wrong number of fields in line ") + 
                              to_string(i + 1) + string(".\n"));
             return false;
         }
 
         if((tokens.at(i).at(1) + tokens.at(i).at(2)).compare(tokens.at(i).at(3) + tokens.at(i).at(4)) == 0) {
-            errors.push_back(string("Config error: An attribute can't be an pointer to himself in line ") + 
+            errors.insert(string("Config error: An attribute can't be an pointer to himself in line ") + 
                              to_string(i + 1) + string(".\n"));
             return false;
         }
@@ -246,7 +317,7 @@ static bool validateConfig(vector<vector<string>> tokens, vector<string> & error
                (((tokens.at(i).at(1) + tokens.at(i).at(2)).compare((tokens.at(j).at(1) + tokens.at(j).at(2))) == 0) || 
                ((tokens.at(i).at(1) + tokens.at(i).at(2)).compare((tokens.at(j).at(3) + tokens.at(j).at(4))) == 0))) {
 
-                errors.push_back(string("Config error: In Attribute repeated in lines ") + to_string(i + 1) + 
+                errors.insert(string("Config error: In Attribute repeated in lines ") + to_string(i + 1) + 
                                  string(" and ") + to_string(j + 1) + string(".\n"));
             
                 return false;
@@ -257,7 +328,7 @@ static bool validateConfig(vector<vector<string>> tokens, vector<string> & error
                (((tokens.at(i).at(3) + tokens.at(i).at(4)).compare((tokens.at(j).at(1) + tokens.at(j).at(2))) == 0) || 
                ((tokens.at(i).at(3) + tokens.at(i).at(4)).compare((tokens.at(j).at(3) + tokens.at(j).at(4))) == 0))) {
                 
-                errors.push_back(string("Config error: Out Attribute repeated in lines ") + to_string(i + 1) + 
+                errors.insert(string("Config error: Out Attribute repeated in lines ") + to_string(i + 1) + 
                                  string(" and ") + to_string(j + 1) + string(".\n"));
             
                 return false;
@@ -288,7 +359,7 @@ vector<vector<string>> getLinks(Configs configs) {
 }
 
 
-bool loadConfig(Configs configs, string path, vector<string> & errors) {
+bool loadConfig(Configs configs, string path, set<string> & errors) {
     FILE* fp = fopen(path.c_str(), "r");
     int tam = 100;
     char buffer[tam];
@@ -301,7 +372,7 @@ bool loadConfig(Configs configs, string path, vector<string> & errors) {
         return false;
 
     for(int i = 0; i < tokens.size(); i++)
-        insertConfig(configs, tokens.at(i).at(0), tokens.at(i).at(1), tokens.at(i).at(3), tokens.at(i).at(2), tokens.at(i).at(4));
+        insertConfig(configs, tokens.at(i).at(0), tokens.at(i).at(1), tokens.at(i).at(3), tokens.at(i).at(2), tokens.at(i).at(4), tokens.at(i).at(5));
 
     return true;
 }
