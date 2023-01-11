@@ -34,6 +34,8 @@ void validateAttributesByElement(Configs configs, string elementName, vector<tup
 
 vector<vector<string>> getLinks(Configs configs);
 
+bool isValidLink(Configs configs, string name, string pointer);
+
 bool loadConfig(Configs configs, string path, set<string> & errors);
 
 #endif

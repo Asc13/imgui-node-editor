@@ -359,6 +359,17 @@ vector<vector<string>> getLinks(Configs configs) {
 }
 
 
+bool isValidLink(Configs configs, string name, string pointer) {
+    for(int i = 0; i < configs->used; i++)
+        if(strcmp(configs->configs[i]->attribute, name.c_str()) == 0 &&
+           strcmp(configs->configs[i]->pointer, pointer.c_str()) == 0)
+            
+            return true;
+
+    return false;
+}
+
+
 bool loadConfig(Configs configs, string path, set<string> & errors) {
     FILE* fp = fopen(path.c_str(), "r");
     int tam = 100;

@@ -242,6 +242,18 @@ struct Example:
         }
 
 
+        bool isLinkedByPins(Pin* a, Pin* b) {
+            for(auto & link : m_Links)
+                if(link.StartPinID == a->ID && link.EndPinID == b->ID)
+                    return true;
+            
+            for(auto & link : m_AttributeLinks)
+                if(link.StartPinID == a->ID && link.EndPinID == b->ID)
+                    return true;
+
+            return false;
+        }
+
         Link* FindLink(ed::LinkId id, bool* isAttribute) {
             for(auto& link : m_Links)
                 if(link.ID == id)
@@ -361,6 +373,13 @@ struct Example:
                 return false;
 
             return true;
+        }
+
+        bool CanCreateAttributeLink(Pin* a, Pin* b) {
+            string name1 = split(a->Name, regex(" = ")).at(0),
+                   name2 = split(b->Name, regex(" = ")).at(0);
+
+            return isValidLink(configs, name1, name2);
         }
 
 
@@ -747,6 +766,8 @@ struct Example:
             }
 
             deleteConfigs(configs);
+            deleteDocument(document);
+
             dtd_ready = false;
             config_ready = false;
         }
@@ -810,8 +831,10 @@ struct Example:
                 found = false; 
                 FindPinByAttritbute(graph, t.at(2), t.at(3), &endPin, true, &found);
 
-                m_AttributeLinks.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
-                m_AttributeLinks.back().Color = GetIconColor(typeMap(t.at(4)));
+                if(found) {
+                    m_AttributeLinks.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
+                    m_AttributeLinks.back().Color = GetIconColor(typeMap(t.at(4)));
+                }
             }
         }
 
@@ -854,6 +877,7 @@ struct Example:
             vector<string> values;
             vector<tuple<string, string>> nameValue;
             vector<string> tokens;
+            vector<string> childs;
             Node* node;
 
             if(graph) {
@@ -866,7 +890,11 @@ struct Example:
                     nameValue.push_back(make_tuple(tokens.at(0), tokens.at(1)));
                 }
 
+                for(auto & c : graph->childs)
+                    childs.push_back(FindNode(c->ID)->Name);
+
                 validateAttributes(document, errors, node->Name, names, values, &valid);
+                validateElements(document, errors, node->Name, childs, &valid);
                 validateAttributesByElement(configs, node->Name, nameValue, errors, &valid);
 
                 for(auto & c: graph->childs)
@@ -1075,7 +1103,7 @@ struct Example:
 
             for(int i = 0; i < attributes_used; i++) {    
                 ImGui::BeginHorizontal(regex_replace(to_string(i), regex("0"), string("Attribute0")).c_str(), ImVec2(paneWidth, 0), 1.0f);
-                ImGui::TextUnformatted((get<0>(attributes.at(i)) + get<1>(attributes.at(i))).c_str());
+                ImGui::TextUnformatted((get<0>(attributes.at(i)) + " = " + get<1>(attributes.at(i))).c_str());
                 ImGui::Spring();
                 ImGui::EndHorizontal();
             }
@@ -1087,7 +1115,7 @@ struct Example:
             vector<string> tempAtt;
 
             if(ImGui::Button("Add") && regex_search(string(att), regex(".+ = .+"))) {
-                tempAtt = split(att, regex(".+ = .+"));
+                tempAtt = split(string(att), regex(" = "));
                 attributes.push_back(make_tuple(tempAtt.at(0), tempAtt.at(1)));
                 attributes_used++;
                 strcpy(att, "");
@@ -1098,7 +1126,7 @@ struct Example:
             vector<tuple<string, string, bool>> map;
 
             if(!(*stay)) {
-                *ID = SpawnElementNode(isClear, value, map, attributes, false);
+                *ID = SpawnElementNode(isClear, value, getAttributesTypes(configs, value), attributes, false);
                 strcpy(value, "");
                 strcpy(att, "");
                 attributes_used = 0;
@@ -1771,6 +1799,15 @@ struct Example:
                                 } 
                                 else if(endPin->Type != startPin->Type) {
                                     showLabel("x Incompatible Pin Type", ImColor(45, 32, 32, 180));
+                                    ed::RejectNewItem(ImColor(255, 128, 128), 1.0f);
+                                }
+                                else if(isLinkedByPins(startPin, endPin)) {
+                                    showLabel("x Already linked", ImColor(45, 32, 32, 180));
+                                    ed::RejectNewItem(ImColor(255, 128, 128), 1.0f);
+                                }
+                                else if(startPin->Type != PinType::Flow && endPin->Type != PinType::Flow && 
+                                        !CanCreateAttributeLink(startPin, endPin)) {
+                                    showLabel("x Invalid Attribute Link", ImColor(45, 32, 32, 180));
                                     ed::RejectNewItem(ImColor(255, 128, 128), 1.0f);
                                 }
                                 else {

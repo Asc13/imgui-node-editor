@@ -75,6 +75,22 @@ static RuleDTD initRule(char r, char rgx) {
 }
 
 
+
+static void printRules(ElementDTD element) {
+    cout << element->elementName << ":" << endl;
+
+    for(int i = 0; i < element->rulesUsed; i++) {
+        cout << element->rules[i]->regex << " " << element->rules[i]->rule << endl;
+
+        for(int j = 0; j < element->rules[i]->childsUsed; j++)
+            cout << (j != 0 ? " | " : "") << element->rules[i]->childs[j];
+    
+        cout << endl;
+    }
+
+    cout << endl;
+}
+
 static void addRule(RuleDTD rule, char* child) {
     if(rule->childsUsed == 0)
         rule->childs = (char**) malloc(sizeof(char*));
@@ -115,24 +131,68 @@ static void addElementRule(ElementDTD element, RuleDTD rule) {
 static void parseChilds(ElementDTD element, string childs) {
     vector<string> tokens;
 
+    regex ORrgx = regex("\\([^\\|,]+(\\|[^\\|,]+)+\\)[*|+|?]?"),
+          ANDrgx = regex("\\([^\\,]+(,[^\\,]+)*\\)");
+
     if(childs.compare("EMPTY") == 0)
         addElementRule(element, initRule('E', '_'));
 
     else if(childs.compare("ANY") == 0)
         addElementRule(element, initRule('A', '_'));
     
-    else if(regex_match(childs, regex("\\([^\\|,]+(\\|[^\\|,]+)+\\)[*|+|?]?"))) {
+    else if(regex_match(childs, ORrgx)) {
         tokens = split(childs, regex("\\(|\\||\\)"));
         
         string last = tokens.back();
+        RuleDTD rule = initRule('|', (char) last.at(0));
 
         for(int i = 0; i < tokens.size() - 1; ++i)
-            addElementRule(element, initRule('|', (char) last.at(0)));          
+            addRule(rule, (char*) tokens.at(i).c_str());
+
+        addElementRule(element, rule);     
     }
 
-    else if(regex_match(childs, regex("\\([^\\|,]+(,[^\\|,]+)*\\)"))) {
-        tokens = split(childs, regex("\\(|,|\\)"));
+    else if(regex_match(childs, ANDrgx)) {
+        tokens = split(childs, regex(","));
+
+        for(auto & token : tokens) {
+            
+            if(regex_match(token, ORrgx)) {
+                tokens = split(token, regex("\\(|\\||\\)"));
+
+                string last = tokens.back();
+                RuleDTD rule = initRule('|', (char) last.at(0));
+
+                for(int i = 0; i < tokens.size() - 1; ++i)
+                    addRule(rule, (char*) tokens.at(i).c_str());    
+
+                addElementRule(element, rule);
+            }
+            else {
+                token.erase(remove(token.begin(), token.end(), '('), token.end());
+                token.erase(remove(token.begin(), token.end(), ')'), token.end());
+                
+                bool hasRGX = regex_match(token, regex(".+[*|+|?]"));
+
+                RuleDTD rule = initRule(',', hasRGX ? (char) token.back() : '_');
+
+                addRule(rule, (char*) (hasRGX ? token.substr(0, token.size() - 1) : token).c_str());
+                addElementRule(element, rule);
+            }   
+        }
     }
+}
+
+static void addElement(DocumentDTD document, ElementDTD element) {
+    if(document->elementsUsed == 0)
+        document->elementList = (ElementDTD*) malloc(sizeof(ElementDTD));
+
+    else if(document->elementsUsed == document->elementsSize) {
+        document->elementsSize *= 2;
+        document->elementList = (ElementDTD*) realloc(document->elementList, document->elementsSize * sizeof(ElementDTD));
+    }
+    
+    document->elementList[document->elementsUsed++] = element;
 }
 
 
@@ -141,6 +201,7 @@ static void parseElement(DocumentDTD document, char* elementString) {
 
     ElementDTD element = initElement((char*) tokens.at(1).c_str());
     parseChilds(element, tokens.at(2));
+    addElement(document, element);
 }
 
 
@@ -162,6 +223,16 @@ static void addAttribute(AttributeListDTD attributeList, char* attributeName, ch
     attributeList->attributeOption[attributeList->attributesUsed++] = strdup(attributeOption);
 }
 
+
+static void validateElementRules(ElementDTD element, set<string> & errors, vector<string> childs, bool* ok) {
+
+    // 1. verificar se childs.size == 0, para elementos que têm empty EMPTY
+    if(element->rules[0]->rule == 'E' && !childs.empty()) {
+        errors.insert(string(element->elementName) + string(" can't have child nodes!!"));
+        *ok = false;
+    }
+    // 2. 
+}
 
 static vector<vector<string>> getAttributeList(DocumentDTD document, string elementName) {
     vector<vector<string>> result;
@@ -334,4 +405,86 @@ void validateAttributes(DocumentDTD document, set<string> & errors, string eleme
             errors.insert(temp.at(i).at(0) + string(" should have ") + temp.at(i).at(2) + string(" as a Value"));
             *ok = false;
     }
+}
+
+
+void validateElements(DocumentDTD document, set<string> & errors, string elementName, vector<string> childs, bool* ok) {
+    for(int i = 0; i < document->elementsUsed; ++i)
+        if(strcmp(document->elementList[i]->elementName, elementName.c_str()) == 0)
+            validateElementRules(document->elementList[i], errors, childs, ok);
+}
+
+
+static void deleteRule(RuleDTD rule) {
+    if(rule->childsUsed > 0) {
+        for(int i = 0; i < rule->childsUsed; i++)
+            free(rule->childs[i]);
+
+        free(rule->childs);
+    }
+
+    free(rule);
+}
+
+
+static void deleteElement(ElementDTD element) {
+    free(element->elementName);
+    
+    if(element->rulesUsed > 0) {
+        for(int i = 0; i < element->rulesUsed; i++)
+            deleteRule(element->rules[i]);
+    
+        free(element->rules);
+    }
+
+    free(element);
+}
+
+
+static void deleteAttributeList(AttributeListDTD attributeList) {
+    free(attributeList->elementName);
+
+    if(attributeList->attributesUsed > 0) {
+        for(int i = 0; i < attributeList->attributesUsed; ++i) {
+            free(attributeList->attributeName[i]);
+            free(attributeList->attributeOption[i]);
+            free(attributeList->attributeType[i]);
+        }
+
+        free(attributeList->attributeName);
+        free(attributeList->attributeOption);
+        free(attributeList->attributeType);
+    }
+    
+    free(attributeList);
+}
+
+
+void deleteDocument(DocumentDTD document) {
+    if(document->attributeListsUsed > 0 || document->elementsUsed > 0) {
+        free(document->source);
+        free(document->root);
+    }
+
+    if(document->elementsUsed > 0) {
+        for(int i = 0; i < document->elementsUsed; ++i)
+            deleteElement(document->elementList[i]);
+
+        free(document->elementList);
+        document->elementList = NULL;
+        document->elementsUsed = 0;
+        document->elementsSize = 1;
+    }
+
+    if(document->attributeListsUsed > 0) {
+        for(int i = 0; i < document->attributeListsUsed; ++i)
+            deleteAttributeList(document->attributeList[i]);
+
+        free(document->attributeList);
+        document->attributeList = NULL;
+        document->attributeListsUsed = 0;
+        document->attributeListsSize = 1;
+    }
+
+
 }

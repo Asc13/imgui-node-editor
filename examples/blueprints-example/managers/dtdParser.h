@@ -13,6 +13,7 @@
 #include <vector>
 #include <set>
 #include <iostream>
+#include <algorithm>
 
 
 using namespace std;
@@ -30,5 +31,10 @@ void parseDocument(DocumentDTD document, string path);
 
 void validateAttributes(DocumentDTD document, set<string> & errors, string elementName, 
                         vector<string> attributeName, vector<string> attributeValue, bool* ok);
+
+void validateElements(DocumentDTD document, set<string> & errors, string elementName, 
+                      vector<string> childs, bool* ok);
+
+void deleteDocument(DocumentDTD document);
 
 #endif
