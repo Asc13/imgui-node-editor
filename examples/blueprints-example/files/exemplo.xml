@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 
 <CATALOG>
-  <PRODUCT NAME="Power drill" PARTNUM="PD-12345" PLANT="Chicago" INVENTORY="InStock">
-    <SPECIFICATIONS WEIGHT="3.4 lbs" POWER="18V">This power drill has a high torque motor and a compact design for easy handling.</SPECIFICATIONS>
-    <OPTIONS FINISH="Metal" ADAPTER="Included" CASE="HardShell">Comes with a hard carrying case and a chuck adapter for various drill bits.</OPTIONS>
-    <PRICE MSRP="99.99" WHOLESALE="79.99" STREET="89.99" SHIPPING="9.99">
-      The price for this power drill is $99.99 MSRP, $79.99 at wholesale, $89.99 on the street, and $9.99 for shipping.
-    </PRICE>
-    <NOTES>This power drill has a 1-year warranty and has received high ratings from customers for its durability and performance.</NOTES>
-  </PRODUCT>
+	<PRODUCT NAME="Power drill" PARTNUM="PD-12345" PLANT="Chicago" INVENTORY="InStock">
+		<SPECIFICATIONS WEIGHT="3.4 lbs" POWER="18V">This power drill has a high torque motor and a compact design for easy handling</SPECIFICATIONS>
+		<OPTIONS FINISH="Metal" ADAPTER="Included" CASE="HardShell">Comes with a hard carrying case and a chuck adapter for various drill bits</OPTIONS>
+		<PRICE MSRP="99.99" WHOLESALE="79.99" STREET="89.99" SHIPPING="9.99">price</PRICE>
+		<NOTES>nota</NOTES>
+	</PRODUCT>
 </CATALOG>

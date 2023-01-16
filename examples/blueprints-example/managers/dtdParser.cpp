@@ -224,6 +224,38 @@ static void addAttribute(AttributeListDTD attributeList, char* attributeName, ch
 }
 
 
+static bool notInChilds(RuleDTD* rules, int size, vector<string> childs, string* impostor) {
+    bool found;
+    
+    for(auto & c : childs) {
+        found = false;
+
+        for(int i = 0; i < size; ++i)
+            for(int j = 0; j < rules[i]->childsUsed; ++j)
+                if(strcmp(rules[i]->childs[j], c.c_str()) == 0)
+                    found = true;
+
+        if(!found) {
+            *impostor = c;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+static int childsCount(string child, vector<string> childs) {
+    int counter = 0;
+
+    for(auto & c : childs)
+        if(child.compare(c) == 0)
+            counter++;
+
+    return counter;
+}
+
+
 static void validateElementRules(ElementDTD element, set<string> & errors, vector<string> childs, bool* ok) {
 
     // 1. verificar se childs.size == 0, para elementos que têm empty EMPTY
@@ -231,8 +263,69 @@ static void validateElementRules(ElementDTD element, set<string> & errors, vecto
         errors.insert(string(element->elementName) + string(" can't have child nodes!!"));
         *ok = false;
     }
-    // 2. 
-}
+
+    string impostor;
+
+    // 2. verificar se existe um filho que não pode estar nos filhos deste elemento
+    if(element->rules[0]->rule != 'A' && element->rules[0]->rule != 'E' && notInChilds(element->rules, element->rulesUsed, childs, &impostor)) {
+        errors.insert(impostor + string(" should not be on ") + string(element->elementName) + string(" childs!!"));
+        *ok = false;
+    }
+
+    // 3. 
+    // AND: + -> pelo menos um igual
+    //      * -> indiferente
+    //      _ -> só 1
+    //      ? -> 0 ou 1
+    // OR:  igual mas para todos os que estão lá
+
+    if(element->rules[0]->rule != 'A' && element->rules[0]->rule != 'E')
+        
+        for(int i = 0; i < element->rulesUsed; ++i) {
+            if(element->rules[i]->rule == ',')
+                switch(element->rules[i]->regex) {
+                    case '+':
+                        for(int j = 0; j < element->rules[i]->childsUsed; ++j)
+                            if(childsCount(string(element->rules[i]->childs[j]), childs) == 0) {
+                                errors.insert(string(element->elementName) + 
+                                            string(" should atleast have one " + string(element->rules[i]->childs[j]) + " node as a child!!"));
+                                *ok = false;
+                            }
+                    
+                        break;
+
+                    case '_':
+                        for(int j = 0; j < element->rules[i]->childsUsed; ++j)
+                            if(childsCount(string(element->rules[i]->childs[j]), childs) != 1 && strcmp(element->rules[i]->childs[j], "#PCDATA") != 0) {
+                                errors.insert(string(element->elementName) + 
+                                            string(" should have one and only one " + string(element->rules[i]->childs[j]) + " node as a child!!"));
+                                *ok = false;
+                            }
+
+                        break;
+
+                    case '?':
+                        for(int j = 0; j < element->rules[i]->childsUsed; ++j)
+                            if(childsCount(string(element->rules[i]->childs[j]), childs) > 2) {
+                                errors.insert(string(element->elementName) + 
+                                            string(" can't have more than one " + string(element->rules[i]->childs[j]) + " node as a child!!"));
+                                *ok = false;
+                            }
+
+                        break;
+                    
+                    default:
+                        break;
+                }
+
+            else {
+
+            }
+        }
+
+
+}   
+
 
 static vector<vector<string>> getAttributeList(DocumentDTD document, string elementName) {
     vector<vector<string>> result;

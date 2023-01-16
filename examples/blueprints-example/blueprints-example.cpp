@@ -33,10 +33,10 @@
 #include "managers/rapidjson/stringbuffer.h"
 #include "managers/dtdParser.h"
 #include "managers/configParser.h"
-
+#include "managers/tinyxml2.cpp"
 
 using namespace std;
-using namespace rapidxml;
+using namespace tinyxml2;
 using namespace rapidjson;
 
 
@@ -761,7 +761,7 @@ struct Example:
                 deleteGraph(&graph);
 
             if(&doc) {
-                doc.clear();
+                doc.Clear();
                 root_node = NULL;
             }
 
@@ -901,49 +901,6 @@ struct Example:
                     validateGraph(c);
             }
 
-        }
-
-
-        Graph* build(const xml_node<>* node, int *current, Graph* parent, bool flag) {
-            Graph* temp = new Graph;
-            
-            temp->current = *current;
-            temp->parent = parent;
-
-            bool isRoot = (parent) ? false : true;
-            float x, y;
-            vector<tuple<string, string>> attributes;
-
-            switch(node->type()) {
-                case node_element:
-
-                    for(const xml_attribute<>* a = node->first_attribute(); a; a = a->next_attribute())
-                        attributes.push_back(make_tuple(a->name(), a->value()));
-
-
-                    temp->ID = SpawnElementNode(isRoot, node->name(), getAttributesTypes(configs, node->name()),
-                                                attributes, node->first_node()->type() == node_element ? false : true);
-                    
-                    if(flag) {
-                        getPositionFromJSON(temp->current, &x, &y);
-                        ed::SetNodePosition(temp->ID, ImVec2(x, y));
-                    }
-
-                    for(const xml_node<>* n = node->first_node(); n; n = n->next_sibling()) {
-                        if(n->type() == node_element) {
-                            (*current)++;
-                            temp->childs.push_back(build(n, current, temp, flag));
-                        }
-                        else {
-                            Node* t = FindNode(temp->ID);
-                            t->Inputs.emplace_back(GetNextId(), n->value(), PinType::Function);
-                            t->Outputs.erase(t->Outputs.begin());
-                        }
-                    }
-
-                    break;
-            }
-            return temp;
         }
 
 
@@ -1549,15 +1506,48 @@ struct Example:
         }
 
 
+        Graph* build(XMLElement* node, int *current, Graph* parent, bool flag) {
+            Graph* temp = new Graph;
+
+            temp->current = *current;
+            temp->parent = parent;
+
+            bool isRoot = (parent) ? false : true;
+
+            float x, y;
+            vector<tuple<string, string>> attributes;
+
+            for(const XMLAttribute* a = node->FirstAttribute(); a; a = a->Next())
+                attributes.push_back(make_tuple(string(a->Name()), string(a->Value())));
+
+            XMLText* value = node->FirstChild()->ToText();
+
+            temp->ID = SpawnElementNode(isRoot, string(node->Name()), getAttributesTypes(configs, string(node->Name())),
+                                        attributes, value ? true : false);
+
+            if(value) {
+                Node* t = FindNode(temp->ID);
+                t->Inputs.emplace_back(GetNextId(), string(value->Value()), PinType::Function);
+                t->Outputs.erase(t->Outputs.begin());
+            }
+
+            if(flag) {
+                getPositionFromJSON(temp->current, &x, &y);
+                ed::SetNodePosition(temp->ID, ImVec2(x, y));
+            }
+
+            for(XMLElement* n = node->FirstChildElement(); n; n = n->NextSiblingElement()) {
+                (*current)++;
+                temp->childs.push_back(build(n, current, temp, flag));
+            }
+
+            return temp;
+        }
+
+
         void loadXML() {
-            ifstream file(xml_name);
-
-            vector<char> buffer((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
-            buffer.push_back('\0');
-
-            doc.parse<0>(&buffer[0]);
-            
-            root_node = doc.first_node();
+            doc.LoadFile(xml_name);
+            root_node = doc.RootElement();
         }
 
 
@@ -1616,6 +1606,7 @@ struct Example:
                 loadXML();
 
                 current = 0;
+
                 graph = build(root_node, &current, NULL, true);
 
                 levels_x = levelXOrder(graph);
@@ -1641,9 +1632,8 @@ struct Example:
                     config_ready = loadConfig(configs, config_name, errors);
 
                 loadXML();
-
+                
                 current = 0;
-
                 graph = build(root_node, &current, NULL, false);
 
                 levels_x = levelXOrder(graph);
@@ -2062,8 +2052,8 @@ struct Example:
 
 
         ImGui::FileBrowser                      fileDialog;
-        xml_document<>                          doc;
-        xml_node<>*                             root_node = NULL;
+        XMLDocument                             doc;
+        XMLElement*                             root_node = NULL;
         Graph*                                  graph = NULL;
         DocumentDTD                             document = NULL;
         Configs                                 configs = NULL;
