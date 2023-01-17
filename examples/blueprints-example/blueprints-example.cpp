@@ -78,6 +78,7 @@ bool                                xml_changed = false;
 bool                                json_ready = false;
 bool                                dtd_ready = false;
 bool                                config_ready = false;
+bool                                runnable = false;
 bool                                valid = true;
 char                                xml_name[500] =  "";
 char                                temp_name[500] = "";
@@ -138,14 +139,15 @@ struct Node {
     ed::NodeId ID;
     std::string Name;
     bool HasValue;
+    bool Root;
     std::vector<Pin> Inputs;
     std::vector<Pin> Outputs;
     ImColor Color;
     NodeType Type;
     ImVec2 Size;
 
-    Node(int id, string name, bool hasValue, NodeType type, ImColor color = ImColor(255, 255, 255)):
-        ID(id), Name(name), HasValue(hasValue), Color(color), Type(type), Size(0, 0) {}
+    Node(int id, string name, bool hasValue, bool root, NodeType type, ImColor color = ImColor(255, 255, 255)):
+        ID(id), Name(name), HasValue(hasValue), Root(root), Color(color), Type(type), Size(0, 0) {}
 };
 
 
@@ -313,11 +315,12 @@ struct Example:
         }
 
 
-        void FindPinByAttritbute(Graph* graph, string element, string attribute, Pin** pin, bool IO, bool* found) {
+        void FindPinByAttribute(Graph* graph, string element, string attribute, Pin** pin, bool IO, bool* found) {
             if(graph) {
                 Node* node = FindNode(graph->ID);
 
                 if(element.compare(node->Name) == 0) {
+
                     for(auto& p : (IO ? node->Inputs : node->Outputs))
                         if(regex_search(p.Name, regex(attribute))) {
                             *pin = &p;
@@ -327,7 +330,7 @@ struct Example:
 
                 if(!(*found))
                     for(auto & c : graph->childs)
-                        FindPinByAttritbute(c, element, attribute, pin, IO, found);
+                        FindPinByAttribute(c, element, attribute, pin, IO, found);
 
             }
         }
@@ -431,7 +434,7 @@ struct Example:
         ed::NodeId SpawnElementNode(bool isRoot, string name, vector<tuple<string, string, bool>> map, 
                                     vector<tuple<string, string>> attributes, bool hasValue) {
 
-            m_Nodes.emplace_back(GetNextId(), name, hasValue, NodeType::Element);
+            m_Nodes.emplace_back(GetNextId(), name, hasValue, isRoot, NodeType::Element);
             tuple<string, string, bool> temp;
             
             if(!isRoot)
@@ -746,6 +749,7 @@ struct Example:
             isClear = true;
             current = 0;
             m_NextId = 1;
+            runnable = false;
             strcpy(temp_name, "");
             m_Nodes.clear();
             m_Links.clear();
@@ -814,24 +818,31 @@ struct Example:
                 levels_x.clear();
                 levels_x = levelXOrder(graph);
                 link(graph, &levels_x, false);
+            }
+        }
 
+        void revalidate() {
+            if(graph) {
+                valid = true;
+                errors.clear();
+                validateGraph(graph);
             }
         }
 
 
         void linkAttributes(Graph* graph) {
             vector<vector<string>> configLinks = getLinks(configs);
-                
+
             Pin* startPin;
             Pin* endPin;
-            bool found = false;
+            bool foundS, foundE;
 
             for(auto& t : configLinks) {
-                FindPinByAttritbute(graph, t.at(0), t.at(1), &startPin, false, &found);
-                found = false; 
-                FindPinByAttritbute(graph, t.at(2), t.at(3), &endPin, true, &found);
+                foundS = false, foundE = false;
+                FindPinByAttribute(graph, t.at(0), t.at(1), &startPin, false, &foundS);
+                FindPinByAttribute(graph, t.at(2), t.at(3), &endPin, true, &foundE);
 
-                if(found) {
+                if(foundS && foundE) {
                     m_AttributeLinks.emplace_back(Link(GetNextId(), startPin->ID, endPin->ID));
                     m_AttributeLinks.back().Color = GetIconColor(typeMap(t.at(4)));
                 }
@@ -893,9 +904,13 @@ struct Example:
                 for(auto & c : graph->childs)
                     childs.push_back(FindNode(c->ID)->Name);
 
-                validateAttributes(document, errors, node->Name, names, values, &valid);
-                validateElements(document, errors, node->Name, childs, &valid);
-                validateAttributesByElement(configs, node->Name, nameValue, errors, &valid);
+                if(dtd_ready) {
+                    validateAttributes(document, errors, node->Name, names, values, &valid);
+                    validateElements(document, errors, node->Name, childs, &valid);
+                }
+                
+                if(config_ready)
+                    validateAttributesByElement(configs, node->Name, nameValue, errors, &valid);
 
                 for(auto & c: graph->childs)
                     validateGraph(c);
@@ -1320,54 +1335,40 @@ struct Example:
             ImGui::Spacing(); ImGui::SameLine();
             ImGui::TextUnformatted("Graph validation");
             
-            if(errors.empty() && dtd_ready) {
+            if(config_ready) {
                 auto start = ImGui::GetCursorScreenPos();
 
-                if(config_ready) {
-                    ImGui::GetWindowDrawList()->AddLine(
-                        start + ImVec2(paneWidth, 0),
-                        start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
-                        IM_COL32(0, 0, 0, 0), 4.0f);
-                    
-                    
-                    ImGui::TextUnformatted("Config sucessfully validated!!");
-                }
-
-                start = ImGui::GetCursorScreenPos();
-
                 ImGui::GetWindowDrawList()->AddLine(
-                        start + ImVec2(paneWidth, 0),
-                        start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
-                        IM_COL32(0, 0, 0, 0), 4.0f);
-
-                if(valid)
-                    ImGui::TextUnformatted("Graph sucessfully validated!!");
-            }
-
-            else {
-                if(config_ready) {
-                    auto start = ImGui::GetCursorScreenPos();
-
-                    ImGui::GetWindowDrawList()->AddLine(
-                        start + ImVec2(paneWidth, 0),
-                        start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
-                        IM_COL32(0, 0, 0, 0), 4.0f);
-                    
-                    ImGui::TextUnformatted("Config sucessfully validated!!");
-                }
-
-                for(set<string>::iterator it = errors.begin(); it != errors.end(); ++it) {
-                    auto start = ImGui::GetCursorScreenPos();
-
-                    ImGui::GetWindowDrawList()->AddLine(
-                        start + ImVec2(paneWidth, 0),
-                        start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
-                        IM_COL32(0, 0, 0, 255 - (int)(255)), 4.0f);
-
-                    ImGui::TextUnformatted(string(*it).c_str());
+                    start + ImVec2(paneWidth, 0),
+                    start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
+                    IM_COL32(0, 0, 0, 0), 4.0f);
                 
+                ImGui::TextUnformatted("Config sucessfully validated!!");
+
+                if(valid) {
+                    start = ImGui::GetCursorScreenPos();
+
+                    ImGui::GetWindowDrawList()->AddLine(
+                            start + ImVec2(paneWidth, 0),
+                            start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
+                            IM_COL32(0, 0, 0, 0), 4.0f);
+
+                    ImGui::TextUnformatted("Graph sucessfully validated!!");
+                }
+                else {
+                    for(set<string>::iterator it = errors.begin(); it != errors.end(); ++it) {
+                        auto start = ImGui::GetCursorScreenPos();
+
+                        ImGui::GetWindowDrawList()->AddLine(
+                            start + ImVec2(paneWidth, 0),
+                            start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
+                            IM_COL32(0, 0, 0, 255 - (int)(255)), 4.0f);
+
+                        ImGui::TextUnformatted(string(*it).c_str());
+                    }
                 }
             }
+
 
             ImGui::GetWindowDrawList()->AddRectFilled(
                 ImGui::GetCursorScreenPos(),
@@ -1517,17 +1518,32 @@ struct Example:
             float x, y;
             vector<tuple<string, string>> attributes;
 
-            for(const XMLAttribute* a = node->FirstAttribute(); a; a = a->Next())
-                attributes.push_back(make_tuple(string(a->Name()), string(a->Value())));
+            for(const XMLAttribute* a = node->FirstAttribute(); a; a = a->Next()) {
+                if(strcmp(a->Name(), "graph") == 0 && strcmp(a->Value(), "runnable") == 0)
+                    runnable = true;
 
-            XMLText* value = node->FirstChild()->ToText();
+                else
+                    attributes.push_back(make_tuple(string(a->Name()), string(a->Value())));
+            }
+
+            XMLText* value = NULL;
+            bool closed = false;
+            
+            if(node->FirstChild())
+                value = node->FirstChild()->ToText();
+
+            if(node->ClosingType() == XMLElement::ElementClosingType::CLOSED)
+                closed = true;
 
             temp->ID = SpawnElementNode(isRoot, string(node->Name()), getAttributesTypes(configs, string(node->Name())),
                                         attributes, value ? true : false);
 
-            if(value) {
+            if(closed || value) {
                 Node* t = FindNode(temp->ID);
-                t->Inputs.emplace_back(GetNextId(), string(value->Value()), PinType::Function);
+
+                if(value && !closed)
+                    t->Inputs.emplace_back(GetNextId(), string(value->Value()), PinType::Function);
+
                 t->Outputs.erase(t->Outputs.begin());
             }
 
@@ -1623,9 +1639,8 @@ struct Example:
                 if(dtd_ready)
                     parseDocument(document, dtd_name);
 
-                if(dtd_ready && config_ready)
+                if(dtd_ready || config_ready)
                     validateGraph(graph);
-
             }
             else if(xml_ready && xml_changed) {
                 if(config_ready)
@@ -1634,6 +1649,7 @@ struct Example:
                 loadXML();
                 
                 current = 0;
+
                 graph = build(root_node, &current, NULL, false);
 
                 levels_x = levelXOrder(graph);
@@ -1652,7 +1668,7 @@ struct Example:
                 if(dtd_ready)
                     parseDocument(document, dtd_name);
 
-                if(dtd_ready && config_ready)
+                if(dtd_ready || config_ready)
                     validateGraph(graph);
 
             }
@@ -1807,6 +1823,7 @@ struct Example:
                                         if(startPin->Type == PinType::Flow && endPin->Type == PinType::Flow) {
                                             linkGraphs(startPinId, endPinId, startPin->Type);
                                             recalibrate();
+                                            revalidate();
                                         }
                                         else {
                                             m_AttributeLinks.emplace_back(Link(GetNextId(), startPinId, endPinId));
@@ -1854,6 +1871,7 @@ struct Example:
 
                                     lookupDeleteGraph(graph, nodeId, &deleted);
                                     recalibrate();
+                                    revalidate();
 
                                     if(!graph)
                                         isClear = true;
@@ -1874,6 +1892,7 @@ struct Example:
                                 
                                 lookupDeleteGraph(graph, nodeId, &deleted);
                                 recalibrate();
+                                revalidate();
                                 
                                 if(!graph)
                                     isClear = true;
@@ -1925,6 +1944,15 @@ struct Example:
                 }
                 else
                     ImGui::Text("Unknown node: %p", contextNodeId.AsPointer());
+                
+                if(runnable && node->Root == true) {
+                    ImGui::Separator();
+
+                    if(ImGui::MenuItem("Run")) {
+                        
+                    }
+                }
+
                 ImGui::Separator();
 
                 if(ImGui::MenuItem("Delete"))
@@ -2017,6 +2045,7 @@ struct Example:
                                     if(startPin->Type == PinType::Flow && endPin->Type == PinType::Flow) {
                                         linkGraphs(startPin->ID, endPin->ID, startPin->Type);
                                         recalibrate();
+                                        revalidate();
                                     }
                                     
                                     break;

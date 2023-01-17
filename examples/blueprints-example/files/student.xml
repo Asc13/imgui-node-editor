@@ -3,6 +3,7 @@
 <MyStudentsData>
 	<Student student_type="Full-time">
 		<Name>Sean</Name>
+		<string id="ola"/>
 	</Student>
 	<Student student_type="Part-time">
 		<Name>Sarah</Name>

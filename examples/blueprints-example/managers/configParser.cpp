@@ -183,14 +183,26 @@ static void insertConfig(Configs configs, string typeS, string element, string p
                                                    (char*) rule.c_str());
 }
 
+template<typename Numeric>
+bool isNumber(string value) {
+    Numeric n;
+    return (istringstream(value) >> n >> ws).eof();
+}
+
+static bool isBoolean(string value) {
+    return regex_match(value, regex("(1|0|True|False|true|false)"));
+}
+
+
+
 
 static void validateValue(Config config, string value, string element, string attribute, set<string> & errors, bool* ok) {
     if(strcmp(config->rule, "_") == 0)
         return;
 
     if(config->type == ConfigType::String && stoi(string(config->rule)) < value.size()) {
-        errors.insert(string("String size must be lower or equal to " + string(config->rule) + 
-                                " on attribute " + attribute + " from " +  element + " Node!"));
+        errors.insert(string("The string size must be lower or equal to " + string(config->rule) + 
+                             " on attribute " + attribute + " from " +  element + " Node!"));
         *ok = false;     
         return;
     }
@@ -198,33 +210,82 @@ static void validateValue(Config config, string value, string element, string at
     vector<string> ruleFields;
 
     if(config->type == ConfigType::Int) {
-        ruleFields = split(string(config->rule), regex(","));
+        if(isNumber<int>(value) && isNumber<long int>(value)) {
+            ruleFields = split(string(config->rule), regex(","));
 
-        if(ruleFields.at(0).at(0) == '[' && stoi(value) < stoi(ruleFields.at(0).substr(1)) ||
-          (ruleFields.at(0).at(0) == ']' && stoi(value) <= stoi(ruleFields.at(0).substr(1))) ||
-          (ruleFields.at(1).back() == '['&& stoi(value) >= stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
-          (ruleFields.at(1).back() == ']' && stoi(value) > stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
+            if(ruleFields.at(0).at(0) == '[' && stoi(value) < stoi(ruleFields.at(0).substr(1)) ||
+            (ruleFields.at(0).at(0) == ']' && stoi(value) <= stoi(ruleFields.at(0).substr(1))) ||
+            (ruleFields.at(1).back() == '['&& stoi(value) >= stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
+            (ruleFields.at(1).back() == ']' && stoi(value) > stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
 
-            errors.insert(string("Int don't respect the interval " + string(config->rule) +
-                                    " on attribute " + attribute + " from " +  element + " Node!"));
-            *ok = false;
+                errors.insert(string("The integer don't respect the interval " + string(config->rule) +
+                                     " on attribute " + attribute + " from " +  element + " Node!"));
+                *ok = false;
+            }
+
+            return;
         }
 
-        return;
+        else {
+            errors.insert(string("The value of attribute " + attribute + " from " + 
+                                 element + " Node must be an integer!"));
+            *ok = false;
+            return;
+        }
     }
     
-    if(config->type == ConfigType::Float || config->type == ConfigType::Double) {
-        ruleFields = split(string(config->rule), regex(","));
+    if(config->type == ConfigType::Float) {
+        if(isNumber<float>(value)) {
+            ruleFields = split(string(config->rule), regex(","));
 
-        if(ruleFields.at(0).at(0) == '[' && stof(value) < stof(ruleFields.at(0).substr(1)) ||
-          (ruleFields.at(0).at(0) == ']' && stof(value) <= stof(ruleFields.at(0).substr(1))) ||
-          (ruleFields.at(1).back() == '['&& stof(value) >= stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
-          (ruleFields.at(1).back() == ']' && stof(value) > stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
+            if(ruleFields.at(0).at(0) == '[' && stof(value) < stof(ruleFields.at(0).substr(1)) ||
+            (ruleFields.at(0).at(0) == ']' && stof(value) <= stof(ruleFields.at(0).substr(1))) ||
+            (ruleFields.at(1).back() == '['&& stof(value) >= stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
+            (ruleFields.at(1).back() == ']' && stof(value) > stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
 
-            errors.insert(string(asString(config->type) + " don't respect the interval " + string(config->rule) +
+                errors.insert(string("The float don't respect the interval " + string(config->rule) +
                                     " on attribute " + attribute + " from " +  element + " Node!"));
-            *ok = false;
+                *ok = false;
+            }
+            return;
         }
+
+        else {
+            errors.insert(string("The value of attribute " + attribute + " from " + 
+                                 element + " Node must be a float!"));
+            *ok = false;
+            return;
+        }
+    }
+
+    if(config->type == ConfigType::Double) {
+        if(isNumber<double>(value) || isNumber<long double>(value)) {
+            ruleFields = split(string(config->rule), regex(","));
+
+            if(ruleFields.at(0).at(0) == '[' && stod(value) < stod(ruleFields.at(0).substr(1)) ||
+            (ruleFields.at(0).at(0) == ']' && stod(value) <= stod(ruleFields.at(0).substr(1))) ||
+            (ruleFields.at(1).back() == '['&& stod(value) >= stod(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
+            (ruleFields.at(1).back() == ']' && stod(value) > stod(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
+
+                errors.insert(string("The double don't respect the interval " + string(config->rule) +
+                                    " on attribute " + attribute + " from " +  element + " Node!"));
+                *ok = false;
+            }
+            return;
+        }
+
+        else {
+            errors.insert(string("The value of attribute " + attribute + " from " + 
+                                 element + " Node must be a double!"));
+            *ok = false;
+            return;
+        }
+    }
+
+    if(config->type == ConfigType::Bool && !isBoolean(value)) {
+        errors.insert(string("The value of attribute " + attribute + " from " + 
+                             element + " Node must be a boolean!"));
+        *ok = false;
         return;
     }
 }

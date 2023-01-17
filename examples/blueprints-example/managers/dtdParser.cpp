@@ -142,11 +142,13 @@ static void parseChilds(ElementDTD element, string childs) {
     
     else if(regex_match(childs, ORrgx)) {
         tokens = split(childs, regex("\\(|\\||\\)"));
-        
-        string last = tokens.back();
+
+        bool hasRGX = regex_match(tokens.back(), regex("[+|*|?]"));
+
+        string last = hasRGX ? tokens.back() : string("_");;
         RuleDTD rule = initRule('|', (char) last.at(0));
 
-        for(int i = 0; i < tokens.size() - 1; ++i)
+        for(int i = 0; i < tokens.size() - hasRGX; ++i)
             addRule(rule, (char*) tokens.at(i).c_str());
 
         addElementRule(element, rule);     
@@ -154,16 +156,18 @@ static void parseChilds(ElementDTD element, string childs) {
 
     else if(regex_match(childs, ANDrgx)) {
         tokens = split(childs, regex(","));
-
+        
         for(auto & token : tokens) {
             
             if(regex_match(token, ORrgx)) {
                 tokens = split(token, regex("\\(|\\||\\)"));
 
-                string last = tokens.back();
+                bool hasRGX = regex_match(tokens.back(), regex("[+|*|?]"));
+                string last = hasRGX ? tokens.back() : string("_");;
+
                 RuleDTD rule = initRule('|', (char) last.at(0));
 
-                for(int i = 0; i < tokens.size() - 1; ++i)
+                for(int i = 0; i < tokens.size() - hasRGX; ++i)
                     addRule(rule, (char*) tokens.at(i).c_str());    
 
                 addElementRule(element, rule);
@@ -230,10 +234,12 @@ static bool notInChilds(RuleDTD* rules, int size, vector<string> childs, string*
     for(auto & c : childs) {
         found = false;
 
-        for(int i = 0; i < size; ++i)
-            for(int j = 0; j < rules[i]->childsUsed; ++j)
+        for(int i = 0; i < size; ++i) {
+            for(int j = 0; j < rules[i]->childsUsed; ++j) {
                 if(strcmp(rules[i]->childs[j], c.c_str()) == 0)
                     found = true;
+            }
+        }
 
         if(!found) {
             *impostor = c;
@@ -285,32 +291,29 @@ static void validateElementRules(ElementDTD element, set<string> & errors, vecto
             if(element->rules[i]->rule == ',')
                 switch(element->rules[i]->regex) {
                     case '+':
-                        for(int j = 0; j < element->rules[i]->childsUsed; ++j)
-                            if(childsCount(string(element->rules[i]->childs[j]), childs) == 0) {
-                                errors.insert(string(element->elementName) + 
-                                            string(" should atleast have one " + string(element->rules[i]->childs[j]) + " node as a child!!"));
-                                *ok = false;
-                            }
+                        if(childsCount(string(element->rules[i]->childs[0]), childs) == 0) {
+                            errors.insert(string(element->elementName) + 
+                                            string(" should atleast have one " + string(element->rules[i]->childs[0]) + " node as a child!!"));
+                            *ok = false;
+                        }
                     
                         break;
 
                     case '_':
-                        for(int j = 0; j < element->rules[i]->childsUsed; ++j)
-                            if(childsCount(string(element->rules[i]->childs[j]), childs) != 1 && strcmp(element->rules[i]->childs[j], "#PCDATA") != 0) {
-                                errors.insert(string(element->elementName) + 
-                                            string(" should have one and only one " + string(element->rules[i]->childs[j]) + " node as a child!!"));
-                                *ok = false;
-                            }
+                        if(childsCount(string(element->rules[i]->childs[0]), childs) != 1 && strcmp(element->rules[i]->childs[0], "#PCDATA") != 0) {
+                            errors.insert(string(element->elementName) + 
+                                            string(" should have one and only one " + string(element->rules[i]->childs[0]) + " node as a child!!"));
+                            *ok = false;
+                        }
 
                         break;
 
                     case '?':
-                        for(int j = 0; j < element->rules[i]->childsUsed; ++j)
-                            if(childsCount(string(element->rules[i]->childs[j]), childs) > 2) {
-                                errors.insert(string(element->elementName) + 
-                                            string(" can't have more than one " + string(element->rules[i]->childs[j]) + " node as a child!!"));
-                                *ok = false;
-                            }
+                        if(childsCount(string(element->rules[i]->childs[0]), childs) > 1) {
+                            errors.insert(string(element->elementName) + 
+                                            string(" can't have more than one " + string(element->rules[i]->childs[0]) + " node as a child!!"));
+                            *ok = false;
+                        }
 
                         break;
                     
@@ -319,11 +322,66 @@ static void validateElementRules(ElementDTD element, set<string> & errors, vecto
                 }
 
             else {
+                vector<tuple<string, int>> counters;
+                string allInTuple = string("(");
 
+                for(int j = 0; j < element->rules[i]->childsUsed; ++j) {
+                    counters.push_back(make_tuple(string(element->rules[i]->childs[j]), childsCount(string(element->rules[i]->childs[j]), childs)));
+                    allInTuple += element->rules[i]->childs[j] + ((j == (element->rules[i]->childsUsed - 1)) ? string(")") : string(", "));
+                }
+                
+                bool condition = true;
+                bool allZeros = true;
+
+                switch(element->rules[i]->regex) {
+                    case '+':
+                        for(auto & c: counters)
+                            if(get<1>(c))
+                                allZeros = false;
+
+                        if(allZeros) {
+                            errors.insert(string(element->elementName) + 
+                                          string(" should atleast have one of these ") + allInTuple + string(" nodes as a child!!"));
+                            *ok = false;
+                        }
+                        
+                        break;
+
+                    case '_':
+                        for(auto & c: counters) {
+                            if(get<1>(c))
+                                allZeros = false;
+
+                            if(get<1>(c) > 1)
+                                condition = false;
+                        }
+                        
+                        if(!condition || allZeros) {
+                            errors.insert(string(element->elementName) + 
+                                          string(" should have one (without repetitions) of these ") + allInTuple + string(" nodes as a child!!"));
+                            *ok = false;
+                        }
+
+                        break;
+
+                    case '?':
+                        for(auto & c: counters)
+                            if(get<1>(c) > 1)
+                                condition = false;
+
+                        if(!condition) {
+                            errors.insert(string(element->elementName) + 
+                                          string(" can't have more than one of each of these ") + allInTuple + string(" nodes as a child!!"));
+                            *ok = false;
+                        }
+
+                        break;
+
+                    default:
+                        break;
+                }
             }
         }
-
-
 }   
 
 
@@ -487,16 +545,17 @@ void validateAttributes(DocumentDTD document, set<string> & errors, string eleme
 
     for(int i = 0; i < temp.size(); i++) {
         if(temp.at(i).at(2).compare("#REQUIRED") == 0 && !inVector(attributeName, temp.at(i).at(0))) {
-            errors.insert(temp.at(i).at(0) + string(" its a Required Attribute"));
+            errors.insert(temp.at(i).at(0) + string(" its a Required Attribute from node " + elementName));
             *ok = false;
         }
 
         if(regex_match(temp.at(i).at(1), regex("\\((.+|)+\\)")) && 
            !inVectorByName(attributeName, temp.at(i).at(0), attributeValue, temp.at(i).at(2)) &&
-           inVector(attributeName, temp.at(i).at(0)))
+           inVector(attributeName, temp.at(i).at(0))) {
 
             errors.insert(temp.at(i).at(0) + string(" should have ") + temp.at(i).at(2) + string(" as a Value"));
             *ok = false;
+        }
     }
 }
 
