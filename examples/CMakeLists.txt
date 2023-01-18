@@ -69,7 +69,7 @@ macro(add_example_executable name)
 
     find_package(imgui REQUIRED)
     find_package(imgui_node_editor REQUIRED)
-    target_link_libraries(${name} PRIVATE imgui imgui_node_editor application)
+    target_link_libraries(${name} PRIVATE imgui imgui_node_editor application ${CMAKE_DL_LIBS})
 
     set(_ExampleBinDir ${CMAKE_BINARY_DIR}/bin)
 
@@ -126,5 +126,4 @@ macro(add_example_executable name)
 endmacro()
 
 add_subdirectory(application)
-
 add_subdirectory(blueprints-example)

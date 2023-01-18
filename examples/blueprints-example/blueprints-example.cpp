@@ -5,7 +5,6 @@
 #include "utilities/widgets.h"
 
 
-
 #include <imgui.h>
 #include <imgui_node_editor.h>
 
@@ -27,6 +26,7 @@
 #include <unistd.h>
 #include <mutex>
 #include <vector>
+#include <dlfcn.h>
 #include "managers/rapidxml.hpp"
 #include "managers/rapidjson/document.h"
 #include "managers/rapidjson/writer.h"
@@ -63,6 +63,8 @@ namespace util = ax::NodeEditor::Utilities;
 
 using namespace ax;
 using ax::Widgets::IconType;
+
+typedef void* (*func_handle)(...);
 
 static ed::EditorContext*        m_Editor = nullptr;
 vector<tuple<int, float, float>> json_info;
@@ -597,6 +599,27 @@ struct Example:
         }
 
 
+        void runGraph() {
+            system("cd /home/bruno/Desktop/---/PI/imgui-node-editor/examples/blueprints-example/files/functions/ ;" 
+                   "g++ -shared sum.cpp -o sum.o");
+
+            void* sum = dlopen("examples/blueprints-example/files/functions/sum.o", RTLD_LAZY);
+            int x = 5, y = 4, z = 0;
+
+            func_handle handler;
+
+            if(sum) {
+                auto func = reinterpret_cast<func_handle>(dlsym(sum, "sum"));
+
+                if(func)
+                    z = (intptr_t) func(x, y);
+
+                cout << z << endl;
+                dlclose(sum);
+            }
+        }
+        
+
         Graph* getGraphByNode(ed::NodeId ID, bool* isPrimary, int* index) {
             Graph* temp = NULL;
             bool found = false;
@@ -1026,7 +1049,9 @@ struct Example:
 
         bool fileExists(string name) {
             ifstream f(name.c_str());
-            return f.good();
+            bool ok = f.good();
+            f.close();
+            return ok;
         }
 
 
@@ -1565,6 +1590,8 @@ struct Example:
 
             vector<char> buf((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
             buf.push_back('\0');
+
+            file.close();
 
             Document mydoc;
             mydoc.Parse(&buf[0]);

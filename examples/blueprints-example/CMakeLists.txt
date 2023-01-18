@@ -1,3 +1,4 @@
+
 add_example_executable(blueprints-example
     blueprints-example.cpp
     utilities/builders.h
@@ -9,6 +10,9 @@ add_example_executable(blueprints-example
     utilities/drawing.cpp
     utilities/widgets.cpp
     managers/dtdParser.cpp
+    managers/configParser.cpp
+    managers/configParser.cpp
+    managers/configParser.cpp
     managers/configParser.cpp
     utilities/imfilebrowser.h
 )
