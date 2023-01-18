@@ -185,15 +185,20 @@ static void insertConfig(Configs configs, string typeS, string element, string p
 
 template<typename Numeric>
 bool isNumber(string value) {
-    Numeric n;
-    return (istringstream(value) >> n >> ws).eof();
+    try {
+        stoi(value) || stof(value) || stod(value);
+        Numeric n;
+        return (istringstream(value) >> n >> ws).eof();
+    }
+    catch (...) {
+        return false;
+    }
 }
+
 
 static bool isBoolean(string value) {
     return regex_match(value, regex("(1|0|True|False|true|false)"));
 }
-
-
 
 
 static void validateValue(Config config, string value, string element, string attribute, set<string> & errors, bool* ok) {
@@ -210,7 +215,7 @@ static void validateValue(Config config, string value, string element, string at
     vector<string> ruleFields;
 
     if(config->type == ConfigType::Int) {
-        if(isNumber<int>(value) && isNumber<long int>(value)) {
+        if(isNumber<int>(value) || isNumber<long int>(value)) {
             ruleFields = split(string(config->rule), regex(","));
 
             if(ruleFields.at(0).at(0) == '[' && stoi(value) < stoi(ruleFields.at(0).substr(1)) ||
@@ -379,7 +384,7 @@ static bool validateConfig(vector<vector<string>> tokens, set<string> & errors) 
                ((tokens.at(i).at(1) + tokens.at(i).at(2)).compare((tokens.at(j).at(3) + tokens.at(j).at(4))) == 0))) {
 
                 errors.insert(string("Config error: In Attribute repeated in lines ") + to_string(i + 1) + 
-                                 string(" and ") + to_string(j + 1) + string(".\n"));
+                              string(" and ") + to_string(j + 1) + string(".\n"));
             
                 return false;
             }
@@ -390,9 +395,39 @@ static bool validateConfig(vector<vector<string>> tokens, set<string> & errors) 
                ((tokens.at(i).at(3) + tokens.at(i).at(4)).compare((tokens.at(j).at(3) + tokens.at(j).at(4))) == 0))) {
                 
                 errors.insert(string("Config error: Out Attribute repeated in lines ") + to_string(i + 1) + 
-                                 string(" and ") + to_string(j + 1) + string(".\n"));
+                              string(" and ") + to_string(j + 1) + string(".\n"));
             
                 return false;
+            }
+
+            if(tokens.at(i).at(5).compare("_") != 0) {
+                vector<string> rule = split(tokens.at(i).at(5), regex("(\\[|,|\\])"));
+
+                if(typeMap(tokens.at(i).at(0)) == ConfigType::Int && 
+                  (!isNumber<int>(rule.at(0)) || !isNumber<long int>(rule.at(0)) ||
+                  !isNumber<int>(rule.at(1)) || !isNumber<long int>(rule.at(1)))) {
+
+                    errors.insert(string("Config error: The type interval ") + tokens.at(i).at(5) + string("in line ") + to_string(i + 1) + string(" must contain integers!!"));
+                    
+                    return false;
+                }
+
+                if(typeMap(tokens.at(i).at(0)) == ConfigType::Float && 
+                  (!isNumber<float>(rule.at(0))) || !isNumber<float>(rule.at(1))) {
+
+                    errors.insert(string("Config error: The type interval ") + tokens.at(i).at(5) + string("in line ") + to_string(i + 1) + string(" must contain float!!"));
+                    
+                    return false;
+                }
+
+                if(typeMap(tokens.at(i).at(0)) == ConfigType::Double && 
+                  (!isNumber<double>(rule.at(0)) || !isNumber<long double>(rule.at(0)) ||
+                   !isNumber<double>(rule.at(1)) || !isNumber<long double>(rule.at(1)))) {
+
+                    errors.insert(string("Config error: The type interval ") + tokens.at(i).at(5) + string("in line ") + to_string(i + 1) + string(" must contain double!!"));
+                    
+                    return false;
+                }
             }
         }
     }

@@ -80,6 +80,10 @@ bool                                dtd_ready = false;
 bool                                config_ready = false;
 bool                                runnable = false;
 bool                                valid = true;
+
+bool                                oneOpen = false;
+int                                 indexOpen = -1;
+
 char                                xml_name[500] =  "";
 char                                temp_name[500] = "";
 string                              json_name;
@@ -102,10 +106,11 @@ enum class PinType {
     Bool,
     Int,
     Float,
+    Double,
     String,
     Object,
     Function,
-    Delegate,
+    Delegate
 };
 
 
@@ -410,13 +415,34 @@ struct Example:
                 return PinType::Float;
             
             if(type.compare("Double") == 0)
-                return PinType::Float;
+                return PinType::Double;
             
             if(type.compare("String") == 0)
                 return PinType::String;
 
             else
                 return PinType::Object;
+        }
+
+
+        string asString(PinType type) {
+            if(type == PinType::Bool)
+                return string("Bool");
+            
+            if(type == PinType::Int)
+                return string("Int");
+
+            if(type == PinType::Float)
+                return string("Float");
+            
+            if(type == PinType::Double)
+                return string("Double");
+            
+            if(type == PinType::String)
+                return string("String");
+
+            else
+                return string("Object");
         }
 
 
@@ -966,6 +992,7 @@ struct Example:
                 case PinType::Bool:     return ImColor(220,  48,  48);
                 case PinType::Int:      return ImColor( 68, 201, 156);
                 case PinType::Float:    return ImColor(147, 226,  74);
+                case PinType::Double:   return ImColor( 82, 127,  43);
                 case PinType::String:   return ImColor(124,  21, 153);
                 case PinType::Object:   return ImColor( 51, 150, 215);
                 case PinType::Function: return ImColor(218,   0, 183);
@@ -984,6 +1011,7 @@ struct Example:
                 case PinType::Bool:     iconType = IconType::Circle; break;
                 case PinType::Int:      iconType = IconType::Circle; break;
                 case PinType::Float:    iconType = IconType::Circle; break;
+                case PinType::Double:   iconType = IconType::Circle; break;
                 case PinType::String:   iconType = IconType::Circle; break;
                 case PinType::Object:   iconType = IconType::Circle; break;
                 case PinType::Function: iconType = IconType::Circle; break;
@@ -1047,6 +1075,106 @@ struct Example:
                 }
             }
         }
+
+
+        void ShowNodeEditing(bool* show = nullptr, bool* stay = nullptr, Node* node = NULL) {
+            if(!ImGui::Begin("Node Editing", show)) {
+                ImGui::End();
+                return;
+            }
+
+            vector<string> tokens;
+            auto paneWidth = ImGui::GetContentRegionAvail().x;
+
+            ImGui::BeginHorizontal("Node Editing", ImVec2(paneWidth, 0), 1.0f);
+            ImGui::TextUnformatted((string("Edit Node: ") + node->Name).c_str());
+            ImGui::EndHorizontal();   
+            
+            if(node->Inputs.size() > 1) {
+                ImGui::Separator();
+                ImGui::BeginHorizontal("Inputs", ImVec2(paneWidth, 0), 1.0f);
+                ImGui::TextUnformatted("Input Attributes: ");
+                ImGui::EndHorizontal();
+
+                for(int i = 1; i < node->Inputs.size() - node->HasValue; ++i) {
+                    ImGui::BeginHorizontal("", ImVec2(paneWidth, 0), 1.0f);
+                    tokens = split(node->Inputs[i].Name, regex(" = "));
+
+                    if(indexOpen == i) {
+                        ImGui::TextUnformatted((asString(node->Inputs[i].Type) + " " + tokens.at(0) + " =").c_str());
+                        ImGui::Spacing();
+                        ImGui::InputText("", value, IM_ARRAYSIZE(value));
+
+                        if(ImGui::Button("Confirm")) {
+                            node->Inputs[i].Name = tokens.at(0) + " = " + string(value);
+                            revalidate();
+                            strcpy(value, "");
+                            oneOpen = false;
+                            indexOpen = -1;
+                        }
+                    }
+                    else {
+                        ImGui::TextUnformatted((asString(node->Inputs[i].Type) + " " + node->Inputs[i].Name).c_str());
+
+                        if(!oneOpen)
+                            if(ImGui::Button((string("Edit ") + tokens.at(0)).c_str())) {
+                                oneOpen = true;
+                                indexOpen = i;
+                            }
+                    }
+
+                    ImGui::Spacing();
+                    ImGui::EndHorizontal();
+                }
+
+                if(node->HasValue) {
+                    ImGui::BeginHorizontal("", ImVec2(paneWidth, 0), 1.0f);
+
+                    if(indexOpen == (node->Inputs.size() - 1)) {
+                        ImGui::TextUnformatted(string("Node Value:").c_str());
+                        ImGui::Spacing();
+                        ImGui::InputText("", value, IM_ARRAYSIZE(value));
+
+                        if(ImGui::Button("Confirm")) {
+                            node->Inputs.back().Name = string(value);
+                            revalidate();
+                            strcpy(value, "");
+                            oneOpen = false;
+                            indexOpen = -1;
+                        }
+                    }
+                    else {
+                        ImGui::TextUnformatted((string("Node Value: ") + node->Inputs.back().Name).c_str());
+                        
+                        if(!oneOpen)
+                            if(ImGui::Button(string("Edit Value").c_str())) {
+                                oneOpen = true;
+                                indexOpen = node->Inputs.size() - 1;
+                            }
+                    }
+
+                    ImGui::Spacing();
+                    ImGui::EndHorizontal();
+                }
+            }
+
+            if(node->Outputs.size() > (node->Outputs[0].Type == PinType::Flow)) {
+                ImGui::Separator();
+                ImGui::BeginHorizontal("Outputs", ImVec2(paneWidth, 0), 1.0f);
+                ImGui::TextUnformatted("Output Attributes: ");
+                ImGui::EndHorizontal();
+
+                for(int i = (node->Outputs[0].Type == PinType::Flow); i < node->Outputs.size(); ++i) {
+                    ImGui::BeginHorizontal("", ImVec2(paneWidth, 0), 1.0f);
+                    ImGui::TextUnformatted((asString(node->Outputs[i].Type) + " " + node->Outputs[i].Name).c_str());
+                    ImGui::Spacing();
+                    ImGui::EndHorizontal();
+                }
+
+                ImGui::Separator();
+            }
+            ImGui::End();
+        }
         
 
         void ShowNodeCreation(bool* show = nullptr, bool* stay = nullptr, ed::NodeId* ID = nullptr) {
@@ -1057,8 +1185,8 @@ struct Example:
 
             auto paneWidth = ImGui::GetContentRegionAvail().x;
 
-            ImGui::BeginHorizontal("Element Node Creation", ImVec2(paneWidth, 0), 1.0f);
-            ImGui::TextUnformatted("Create Element Node");
+            ImGui::BeginHorizontal("Node Creation", ImVec2(paneWidth, 0), 1.0f);
+            ImGui::TextUnformatted("Create Node");
             ImGui::Spring();
             ImGui::EndHorizontal();
             ImGui::Spacing();
@@ -1355,18 +1483,17 @@ struct Example:
 
                     ImGui::TextUnformatted("Graph sucessfully validated!!");
                 }
-                else {
-                    for(set<string>::iterator it = errors.begin(); it != errors.end(); ++it) {
-                        auto start = ImGui::GetCursorScreenPos();
+            }
 
-                        ImGui::GetWindowDrawList()->AddLine(
-                            start + ImVec2(paneWidth, 0),
-                            start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
-                            IM_COL32(0, 0, 0, 255 - (int)(255)), 4.0f);
+            for(set<string>::iterator it = errors.begin(); it != errors.end(); ++it) {
+                auto start = ImGui::GetCursorScreenPos();
 
-                        ImGui::TextUnformatted(string(*it).c_str());
-                    }
-                }
+                ImGui::GetWindowDrawList()->AddLine(
+                    start + ImVec2(paneWidth, 0),
+                    start + ImVec2(paneWidth, ImGui::GetTextLineHeight()),
+                    IM_COL32(0, 0, 0, 255 - (int)(255)), 4.0f);
+
+                ImGui::TextUnformatted(string(*it).c_str());
             }
 
 
@@ -1649,7 +1776,7 @@ struct Example:
                 loadXML();
                 
                 current = 0;
-
+                
                 graph = build(root_node, &current, NULL, false);
 
                 levels_x = levelXOrder(graph);
@@ -1930,6 +2057,8 @@ struct Example:
             ed::Suspend();
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 8));
             
+            static bool showNodeEditing = false, stayEditing = true;
+
             if(ImGui::BeginPopup("Node Context Menu")) {
                 auto node = FindNode(contextNodeId);
 
@@ -1951,6 +2080,13 @@ struct Example:
                     if(ImGui::MenuItem("Run")) {
                         
                     }
+                }
+
+                ImGui::Separator();
+
+                if(ImGui::MenuItem("Edit")) {
+                    nodeEditing = node;
+                    showNodeEditing = true;
                 }
 
                 ImGui::Separator();
@@ -2003,6 +2139,10 @@ struct Example:
                 ImGui::EndPopup();
             }
 
+            if(showNodeEditing)
+                ShowNodeEditing(&showNodeEditing, &stayEditing, nodeEditing);
+
+
             static bool showNodeCreation = false, stay = true;
             ed::NodeId ID = 0;
             Node* node;
@@ -2014,9 +2154,6 @@ struct Example:
                 
                 ImGui::EndPopup();
             }
-            else
-                createNewNode = false;
-
 
             if(showNodeCreation) {
                 ShowNodeCreation(&showNodeCreation, &stay, &ID);
@@ -2084,6 +2221,7 @@ struct Example:
         XMLDocument                             doc;
         XMLElement*                             root_node = NULL;
         Graph*                                  graph = NULL;
+        Node*                                   nodeEditing = NULL;
         DocumentDTD                             document = NULL;
         Configs                                 configs = NULL;
         set<string>                             errors;
