@@ -218,17 +218,17 @@ static void validateValue(Config config, string value, string element, string at
         if(isNumber<int>(value) || isNumber<long int>(value)) {
             ruleFields = split(string(config->rule), regex(","));
 
-            if(ruleFields.at(0).at(0) == '[' && stoi(value) < stoi(ruleFields.at(0).substr(1)) ||
+            if((ruleFields.at(0).at(0) == '[' && stoi(value) < stoi(ruleFields.at(0).substr(1))) ||
             (ruleFields.at(0).at(0) == ']' && stoi(value) <= stoi(ruleFields.at(0).substr(1))) ||
-            (ruleFields.at(1).back() == '['&& stoi(value) >= stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
-            (ruleFields.at(1).back() == ']' && stoi(value) > stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
-
+            (ruleFields.at(1).back() == '['&& stoi(value) >= stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 2))) ||
+            (ruleFields.at(1).back() == ']' && stoi(value) > stoi(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 2)))) {
                 errors.insert(string("The integer don't respect the interval " + string(config->rule) +
                                      " on attribute " + attribute + " from " +  element + " Node!"));
                 *ok = false;
+                return;
             }
 
-            return;
+            
         }
 
         else {
@@ -243,16 +243,16 @@ static void validateValue(Config config, string value, string element, string at
         if(isNumber<float>(value)) {
             ruleFields = split(string(config->rule), regex(","));
 
-            if(ruleFields.at(0).at(0) == '[' && stof(value) < stof(ruleFields.at(0).substr(1)) ||
+            if((ruleFields.at(0).at(0) == '[' && stof(value) < stof(ruleFields.at(0).substr(1))) ||
             (ruleFields.at(0).at(0) == ']' && stof(value) <= stof(ruleFields.at(0).substr(1))) ||
-            (ruleFields.at(1).back() == '['&& stof(value) >= stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
-            (ruleFields.at(1).back() == ']' && stof(value) > stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
+            (ruleFields.at(1).back() == '['&& stof(value) >= stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 2))) ||
+            (ruleFields.at(1).back() == ']' && stof(value) > stof(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 2)))) {
 
                 errors.insert(string("The float don't respect the interval " + string(config->rule) +
                                     " on attribute " + attribute + " from " +  element + " Node!"));
                 *ok = false;
+                return;
             }
-            return;
         }
 
         else {
@@ -267,16 +267,15 @@ static void validateValue(Config config, string value, string element, string at
         if(isNumber<double>(value) || isNumber<long double>(value)) {
             ruleFields = split(string(config->rule), regex(","));
 
-            if(ruleFields.at(0).at(0) == '[' && stod(value) < stod(ruleFields.at(0).substr(1)) ||
+            if((ruleFields.at(0).at(0) == '[' && stod(value) < stod(ruleFields.at(0).substr(1))) ||
             (ruleFields.at(0).at(0) == ']' && stod(value) <= stod(ruleFields.at(0).substr(1))) ||
-            (ruleFields.at(1).back() == '['&& stod(value) >= stod(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1))) ||
-            (ruleFields.at(1).back() == ']' && stod(value) > stod(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 1)))) {
-
+            (ruleFields.at(1).back() == '['&& stod(value) >= stod(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 2))) ||
+            (ruleFields.at(1).back() == ']' && stod(value) > stod(ruleFields.at(1).substr(0, ruleFields.at(1).size() - 2)))) {
                 errors.insert(string("The double don't respect the interval " + string(config->rule) +
                                     " on attribute " + attribute + " from " +  element + " Node!"));
                 *ok = false;
+                return;
             }
-            return;
         }
 
         else {
@@ -296,22 +295,24 @@ static void validateValue(Config config, string value, string element, string at
 }
 
 
-static void validateAttributes(Config config, vector<tuple<string, string>> nameValue, string element, set<string> & errors, bool* ok) {
-    for(auto & vt : nameValue)
-            if(strcmp(config->attribute, (char*) get<0>(vt).c_str()) == 0 ||
-               strcmp(config->pointer, (char*) get<0>(vt).c_str()) == 0)
-                validateValue(config, get<1>(vt), element, get<0>(vt), errors, ok);
+static void validateAttributes(Config config, vector<tuple<string, string>> nameValue, string element, set<string> & errors, bool* ok, bool pointer) {
+    for(auto & vt : nameValue) {
+        if(!pointer && strcmp(config->attribute, (char*) get<0>(vt).c_str()) == 0)
+            validateValue(config, get<1>(vt), element, get<0>(vt), errors, ok);
+
+        if(pointer && strcmp(config->pointer, (char*) get<0>(vt).c_str()) == 0)
+            validateValue(config, get<1>(vt), element, get<0>(vt), errors, ok);
+    }
 }
 
 
 void validateAttributesByElement(Configs configs, string elementName, vector<tuple<string, string>> nameValue, set<string> & errors, bool* ok) {
-    for(int i = 0; i < configs->used; i++) {
-        if(strcmp(configs->configs[i]->element, (char*) elementName.c_str()) == 0)
-            validateAttributes(configs->configs[i], nameValue, elementName, errors, ok);
+    bool pointer;
 
-        if(strcmp(configs->configs[i]->pointerElement, (char*) elementName.c_str()) == 0)
-            validateAttributes(configs->configs[i], nameValue, elementName, errors, ok);
-    }
+    for(int i = 0; i < configs->used; i++)
+        if((strcmp(configs->configs[i]->element, (char*) elementName.c_str()) == 0) ^
+           (pointer = strcmp(configs->configs[i]->pointerElement, (char*) elementName.c_str()) == 0))
+            validateAttributes(configs->configs[i], nameValue, elementName, errors, ok, pointer);
 }
 
 
