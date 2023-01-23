@@ -866,6 +866,7 @@ struct Example:
                 levels_x.clear();
                 levels_x = levelXOrder(graph);
                 link(graph, &levels_x, false);
+                readjust(graph, maxWidth(&levels_x), height(graph), &levels_x);
             }
         }
 
@@ -1368,6 +1369,19 @@ struct Example:
 
             ImGui::Spring(0.0f);
             
+            if(ImGui::Button(" Save Files "))
+                showSave = true;
+
+            ImGui::Spring(0.0f);
+
+            if(ImGui::Button("XMLReader"))
+                showXMLReader = true;
+
+            ImGui::EndHorizontal();
+
+            ImGui::BeginHorizontal("Style Editor", ImVec2(paneWidth, -200));
+            ImGui::Spring(0.0f, 0.0f);
+
             if(ImGui::Button("Show Flow")) {
                 for(auto& link : m_Links)
                     ed::Flow(link.ID);
@@ -1376,33 +1390,25 @@ struct Example:
                     ed::Flow(link.ID);
             }
 
-            ImGui::Spring(0.0f);
-
-            if(ImGui::Button("XMLReader"))
-                showXMLReader = true;
-
-            ImGui::Spring(0.0f);
-
-            if(ImGui::Button("Edit Style"))
-                showStyleEditor = true;
-
-            ImGui::EndHorizontal();
-
-            ImGui::BeginHorizontal("Style Editor", ImVec2(paneWidth, -200));
-            ImGui::Spring(0.0f, 0.0f);
-            ImGui::Checkbox("Show Ordinals", &m_ShowOrdinals);
-            ImGui::Spring(0.0f);
-
-            if(ImGui::Button(" Save Files "))
-                showSave = true;
-
             if(ImGui::Button("Readjust"))
                 m_readjust = true;
 
             if(ImGui::Button("Clear"))
                 m_clear = true;
 
+            if(ImGui::Button("Edit Style"))
+                showStyleEditor = true;
+
             ImGui::EndHorizontal();
+            ImGui::BeginHorizontal("Style Editor", ImVec2(paneWidth, -400));
+            
+            ImGui::Checkbox("Show Ordinals", &m_ShowOrdinals);
+            ImGui::Spring(0.0f);
+            ImGui::Checkbox("Hide links", &m_hideLinks);
+            ImGui::Spring(0.0f);
+            
+            ImGui::EndHorizontal();
+            
 
             if(showXMLReader) {
                 ShowXmlReader(&showXMLReader);
@@ -1909,12 +1915,14 @@ struct Example:
                 }
 
                 /* Display Links */
-                for(auto& link : m_Links)
-                    ed::Link(link.ID, link.StartPinID, link.EndPinID, link.Color, 2.0f);
+                if(!m_hideLinks && runnable) {
+                    for(auto& link : m_Links)
+                        ed::Link(link.ID, link.StartPinID, link.EndPinID, link.Color, 2.0f);
+                }
 
                 for(auto& link : m_AttributeLinks)
                     ed::Link(link.ID, link.StartPinID, link.EndPinID, link.Color, 2.0f);
-
+                
 
                 if(!createNewNode) {
                     
@@ -2228,7 +2236,7 @@ struct Example:
 
             auto editorMin = ImGui::GetItemRectMin();
             auto editorMax = ImGui::GetItemRectMax();
-
+                
             if(m_ShowOrdinals)
                 showOrdinals(editorMin, editorMax);
 
@@ -2260,7 +2268,7 @@ struct Example:
         ImTextureID                             m_HeaderBackground = nullptr, m_SaveIcon = nullptr, m_RestoreIcon = nullptr;
         const float                             m_TouchTime = 1.0f;
         map<ed::NodeId, float, NodeIdLess>      m_NodeTouchTime;
-        bool                                    m_ShowOrdinals = false, m_readjust = false, m_clear = false;
+        bool                                    m_ShowOrdinals = false, m_hideLinks = false, m_readjust = false, m_clear = false;
 };
 
 
