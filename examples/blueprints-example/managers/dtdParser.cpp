@@ -13,8 +13,8 @@ struct document {
 struct rule {
     char** childs;
     int childsUsed, childsSize;
-    char rule; // , or | or _
-    char regex; // * or + or ? or _
+    char rule; 
+    char regex;
 };
 
 
@@ -264,7 +264,6 @@ static int childsCount(string child, vector<string> childs) {
 
 static void validateElementRules(ElementDTD element, set<string> & errors, vector<string> childs, bool* ok) {
 
-    // 1. verificar se childs.size == 0, para elementos que têm empty EMPTY
     if(element->rules[0]->rule == 'E' && !childs.empty()) {
         errors.insert(string(element->elementName) + string(" can't have child nodes!!"));
         *ok = false;
@@ -272,18 +271,12 @@ static void validateElementRules(ElementDTD element, set<string> & errors, vecto
 
     string impostor;
 
-    // 2. verificar se existe um filho que não pode estar nos filhos deste elemento
+
     if(element->rules[0]->rule != 'A' && element->rules[0]->rule != 'E' && notInChilds(element->rules, element->rulesUsed, childs, &impostor)) {
-        errors.insert(impostor + string(" should not be on ") + string(element->elementName) + string(" childs!!"));
+        errors.insert(impostor + string(" must not be on ") + string(element->elementName) + string(" childs!!"));
         *ok = false;
     }
 
-    // 3. 
-    // AND: + -> pelo menos um igual
-    //      * -> indiferente
-    //      _ -> só 1
-    //      ? -> 0 ou 1
-    // OR:  igual mas para todos os que estão lá
 
     if(element->rules[0]->rule != 'A' && element->rules[0]->rule != 'E')
         
@@ -293,7 +286,7 @@ static void validateElementRules(ElementDTD element, set<string> & errors, vecto
                     case '+':
                         if(childsCount(string(element->rules[i]->childs[0]), childs) == 0) {
                             errors.insert(string(element->elementName) + 
-                                            string(" should atleast have one " + string(element->rules[i]->childs[0]) + " node as a child!!"));
+                                            string(" must atleast have one " + string(element->rules[i]->childs[0]) + " node as a child!!"));
                             *ok = false;
                         }
                     
@@ -302,7 +295,7 @@ static void validateElementRules(ElementDTD element, set<string> & errors, vecto
                     case '_':
                         if(childsCount(string(element->rules[i]->childs[0]), childs) != 1 && strcmp(element->rules[i]->childs[0], "#PCDATA") != 0) {
                             errors.insert(string(element->elementName) + 
-                                            string(" should have one and only one " + string(element->rules[i]->childs[0]) + " node as a child!!"));
+                                            string(" must have one and only one " + string(element->rules[i]->childs[0]) + " node as a child!!"));
                             *ok = false;
                         }
 
@@ -341,7 +334,7 @@ static void validateElementRules(ElementDTD element, set<string> & errors, vecto
 
                         if(allZeros) {
                             errors.insert(string(element->elementName) + 
-                                          string(" should atleast have one of these ") + allInTuple + string(" nodes as a child!!"));
+                                          string(" must atleast have one of these ") + allInTuple + string(" nodes as a child!!"));
                             *ok = false;
                         }
                         
@@ -358,7 +351,7 @@ static void validateElementRules(ElementDTD element, set<string> & errors, vecto
                         
                         if(!condition || allZeros) {
                             errors.insert(string(element->elementName) + 
-                                          string(" should have one (without repetitions) of these ") + allInTuple + string(" nodes as a child!!"));
+                                          string(" must have one (without repetitions) of these ") + allInTuple + string(" nodes as a child!!"));
                             *ok = false;
                         }
 

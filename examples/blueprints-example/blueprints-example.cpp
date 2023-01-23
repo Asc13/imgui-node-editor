@@ -614,7 +614,6 @@ struct Example:
                 if(func)
                     z = (intptr_t) func(x, y);
 
-                cout << z << endl;
                 dlclose(sum);
             }
         }
@@ -945,6 +944,10 @@ struct Example:
 
                 for(int i = 1; i < node->Inputs.size() - (node->HasValue ? 1 : 0); ++i) {
                     tokens = split(node->Inputs.at(i).Name, regex(" = "));
+                    
+                    if(tokens.size() == 1)
+                        tokens.push_back("");
+
                     names.push_back(tokens.at(0));
                     values.push_back(tokens.at(1));
                     nameValue.push_back(make_tuple(tokens.at(0), tokens.at(1)));
@@ -1803,7 +1806,6 @@ struct Example:
                 loadXML();
                 
                 current = 0;
-                
                 graph = build(root_node, &current, NULL, false);
 
                 levels_x = levelXOrder(graph);
@@ -1824,7 +1826,6 @@ struct Example:
 
                 if(dtd_ready || config_ready)
                     validateGraph(graph);
-
             }
 
             BuildNodes();
@@ -2214,7 +2215,6 @@ struct Example:
                                     
                                     break;
                                 }
-
                         }
                     }
 
