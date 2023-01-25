@@ -146,6 +146,7 @@ struct Node {
     ed::NodeId ID;
     std::string Name;
     bool HasValue;
+    bool Closed;
     bool Root;
     std::vector<Pin> Inputs;
     std::vector<Pin> Outputs;
@@ -153,8 +154,8 @@ struct Node {
     NodeType Type;
     ImVec2 Size;
 
-    Node(int id, string name, bool hasValue, bool root, NodeType type, ImColor color = ImColor(255, 255, 255)):
-        ID(id), Name(name), HasValue(hasValue), Root(root), Color(color), Type(type), Size(0, 0) {}
+    Node(int id, string name, bool hasValue, bool closed, bool root, NodeType type, ImColor color = ImColor(255, 255, 255)):
+        ID(id), Name(name), HasValue(hasValue), Closed(closed), Root(root), Color(color), Type(type), Size(0, 0) {}
 };
 
 
@@ -196,6 +197,7 @@ struct Graph {
     int level_x;
     int level_y;
     ed::NodeId ID;
+    Node* node;
     Graph* parent;
     vector<Graph*> childs;
 };
@@ -235,19 +237,24 @@ struct Example:
         void UpdateTouch() {
             const auto deltaTime = ImGui::GetIO().DeltaTime;
             
-            for (auto& entry : m_NodeTouchTime) {
+            for(auto& entry : m_NodeTouchTime) {
                 if(entry.second > 0.0f)
                     entry.second -= deltaTime;
             }
         }
 
 
-        Node* FindNode(ed::NodeId id) {
-            for(auto& node : m_Nodes)
-                if(node.ID == id)
-                    return &node;
+        void FindNode(Graph* graph, Node** node, ed::NodeId id, bool* found) {
+            if(graph) {
+                if(graph->node->ID == id) {
+                    *node = graph->node;
+                    *found = true;
+                }
 
-            return nullptr;
+                if(!(*found))
+                    for(auto & c : graph->childs)
+                        FindNode(c, node, id, found);
+            }
         }
 
 
@@ -278,57 +285,70 @@ struct Example:
         }
 
 
-        Pin* FindPin(ed::PinId id) {
+        void FindPin(Graph* graph, ed::PinId id, Pin** pin, bool* found) {
             if(!id)
-                return nullptr;
+                *pin = nullptr;
+            
+            if(graph) {
+                for(auto& p : graph->node->Inputs)
+                    if(p.ID == id) {
+                        *pin = &p;
+                        *found = true;
+                    }
 
-            for(auto& node : m_Nodes) {
-                for(auto& pin : node.Inputs)
-                    if(pin.ID == id)
-                        return &pin;
+                if(!(*found))
+                    for(auto& p : graph->node->Outputs)
+                        if(p.ID == id) {
+                            *pin = &p;
+                            *found = true;
+                        }
 
-                for(auto& pin : node.Outputs)
-                    if(pin.ID == id)
-                        return &pin;
+                if(!(*found))
+                    for(auto & c : graph->childs)
+                        FindPin(c, id, pin, found);
             }
-
-            return nullptr;
         }
 
 
-        Node* FindNodeWithInputPin(ed::PinId id) {
+        void FindNodeWithInputPin(Graph* graph, Node** node, ed::PinId id, bool* found) {
             if(!id)
-                return nullptr;
+                *node = nullptr;
 
-            for(auto& node : m_Nodes)
-                for(auto& pin : node.Inputs)
+            if(graph) {
+                for(auto& pin : graph->node->Inputs)
                     if(pin.ID == id)
-                        return &node;
+                        *node = graph->node;
 
-            return nullptr;
+                if(!(*found))
+                    for(auto & c : graph->childs)
+                        FindNodeWithInputPin(c, node, id, found);
+            }
         }
 
 
-        Node* FindNodeWithOutputPin(ed::PinId id) {
+        void FindNodeWithOutputPin(Graph* graph, Node** node, ed::PinId id, bool* found) {
             if(!id)
-                return nullptr;
+                *node = nullptr;
 
-            for(auto& node : m_Nodes)
-                for(auto& pin : node.Outputs)
-                    if(pin.ID == id)
-                        return &node;
+            if(graph) {
+                for(auto& pin : graph->node->Outputs)
+                    if(pin.ID == id) {
+                        *node = graph->node;
+                        *found = true;
+                    }
 
-            return nullptr;
+                if(!(*found))
+                    for(auto & c : graph->childs)
+                        FindNodeWithOutputPin(c, node, id, found);
+            }
         }
 
 
         void FindPinByAttribute(Graph* graph, string element, string attribute, Pin** pin, bool IO, bool* found) {
             if(graph) {
-                Node* node = FindNode(graph->ID);
+                if(element.compare(graph->node->Name) == 0) {
 
-                if(element.compare(node->Name) == 0) {
-
-                    for(auto& p : (IO ? node->Inputs : node->Outputs))
+                    for(auto& p : (IO ? graph->node->Inputs : graph->node->Outputs))
                         if(regex_search(p.Name, regex(attribute))) {
                             *pin = &p;
                             *found = true;
@@ -459,33 +479,34 @@ struct Example:
         }
 
 
-        ed::NodeId SpawnElementNode(bool isRoot, string name, vector<tuple<string, string, bool>> map, 
-                                    vector<tuple<string, string>> attributes, bool hasValue) {
+        Node* SpawnElementNode(bool isRoot, string name, vector<tuple<string, string, bool>> map, 
+                               vector<tuple<string, string>> attributes, bool hasValue, bool closed) {
 
-            m_Nodes.emplace_back(GetNextId(), name, hasValue, isRoot, NodeType::Element);
+            Node* n = new Node(GetNextId(), name, hasValue, closed, isRoot, NodeType::Element);
+
             tuple<string, string, bool> temp;
             
             if(!isRoot)
-                m_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
+                n->Inputs.emplace_back(GetNextId(), "", PinType::Flow);
             
-            m_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
+            n->Outputs.emplace_back(GetNextId(), "", PinType::Flow);
             
             if(!map.empty())
                 for(auto s : attributes) {
                     temp = searchAttribute(get<0>(s), map);
 
                     if(get<2>(temp))
-                        m_Nodes.back().Inputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), typeMap(get<1>(temp)));
+                        n->Inputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), typeMap(get<1>(temp)));
                     
                     else {
-                        m_Nodes.back().Outputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), typeMap(get<1>(temp)));
+                        n->Outputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), typeMap(get<1>(temp)));
                     }
                 }
             else
                 for(auto s : attributes)
-                    m_Nodes.back().Inputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), PinType::String);
+                    n->Inputs.emplace_back(GetNextId(), get<0>(s) + " = " + get<1>(s), PinType::String);
             
-            return m_Nodes.back().ID;
+            return n;
         }
 
 
@@ -644,9 +665,21 @@ struct Example:
 
 
         void linkGraphs(ed::PinId startPinId, ed::PinId endPinId, PinType type) {
-            Node *nStart = FindNodeWithOutputPin(startPinId), 
-                 *nEnd = FindNodeWithInputPin(endPinId);
-            
+            Node *nStart, *nEnd;
+            bool foundS = false, foundE = false;
+
+            FindNodeWithOutputPin(graph, &nStart, startPinId, &foundS);
+
+            if(!foundS)
+                for(auto & sG : secondaryGraphs)
+                    FindNodeWithOutputPin(sG, &nStart, startPinId, &foundS);
+
+            FindNodeWithInputPin(graph, &nEnd, endPinId, &foundE);
+
+            if(!foundE)
+                for(auto & sG : secondaryGraphs)
+                    FindNodeWithInputPin(sG, &nEnd, endPinId, &foundE);
+
             bool isPrimaryStart, isPrimaryEnd = false;
             int indexStart = 0, indexEnd = 0;
 
@@ -670,6 +703,7 @@ struct Example:
             Graph* temp = new Graph;
             vector<Graph*> childs;
 
+            temp->node = node;
             temp->parent = NULL;
             temp->ID = node->ID;
             temp->level_x = 0;
@@ -686,33 +720,12 @@ struct Example:
         }
 
 
-        void deleteNodes(Graph* graph) {
-            if(graph) {
-                for(auto c : graph->childs)
-                    deleteNodes(c);
-
-                ed::NodeId nodeId = graph->ID;
-
-                Node* node = FindNode(graph->ID);
-
-                for(auto i : node->Inputs)
-                    DeleteLinkToPin(i.ID);
-                
-                auto id = find_if(m_Nodes.begin(), m_Nodes.end(), [nodeId](auto& aux) {
-                    return aux.ID == nodeId;
-                });
-
-                if(id != m_Nodes.end())
-                    m_Nodes.erase(id);                 
-            }
-        }
-
-
         void recDelete(Graph* graph) {
             if(graph) {
                 for(auto c : graph->childs)        
                     recDelete(c);
 
+                delete graph->node;
                 graph->childs.clear();
                 
                 if(graph->parent)
@@ -750,12 +763,12 @@ struct Example:
                 if(!(graph->childs).empty())
                     lookupDeleteGraph((graph->childs).at(0), ID, deleted);
 
-                if(graph->ID == ID) {
+                if(graph->node->ID == ID) {
                     if(graph->parent) {
                         int i = 0;
 
                         for(auto a : (graph->parent)->childs) {
-                            if(a->ID == graph->ID)
+                            if(a->ID == graph->node->ID)
                                 break;
                             i++;
                         }
@@ -764,7 +777,11 @@ struct Example:
                         ((graph->parent)->childs).erase(((graph->parent)->childs).begin() + i);
                     }
 
-                    deleteNodes(graph);
+                    for(auto i : graph->node->Inputs)
+                        DeleteLinkToPin(i.ID);
+
+                    delete graph->node;
+                    graph->node = NULL;
                     deleteGraph(&graph);
 
                     *deleted = true;
@@ -799,14 +816,14 @@ struct Example:
             m_NextId = 1;
             runnable = false;
             strcpy(temp_name, "");
-            m_Nodes.clear();
             m_Links.clear();
             m_AttributeLinks.clear();
             levels_x.clear();
             errors.clear();
 
             for(auto g : secondaryGraphs)
-                delete g;
+                deleteGraph(&g);
+
             secondaryGraphs.clear();
 
             if(graph)
@@ -914,7 +931,7 @@ struct Example:
             graph->level_y = levelYOrder(graph, levels_x);
 
             if(flag && graph->parent) {
-                m_Links.emplace_back(Link(GetNextLinkId(), m_Nodes[parent].Outputs[0].ID, m_Nodes[current].Inputs[0].ID));
+                m_Links.emplace_back(Link(GetNextLinkId(), graph->parent->node->Outputs[0].ID, graph->node->Inputs[0].ID));
                 m_Links.back().Color = GetIconColor(PinType::Flow);
             }
 
@@ -938,13 +955,10 @@ struct Example:
             vector<tuple<string, string>> nameValue;
             vector<string> tokens;
             vector<string> childs;
-            Node* node;
 
             if(graph) {
-                node = FindNode(graph->ID);
-
-                for(int i = 1; i < node->Inputs.size() - (node->HasValue ? 1 : 0); ++i) {
-                    tokens = split(node->Inputs.at(i).Name, regex(" = "));
+                for(int i = 1; i < graph->node->Inputs.size() - (graph->node->HasValue ? 1 : 0); ++i) {
+                    tokens = split(graph->node->Inputs.at(i).Name, regex(" = "));
                     
                     if(tokens.size() == 1)
                         tokens.push_back("");
@@ -955,15 +969,15 @@ struct Example:
                 }
 
                 for(auto & c : graph->childs)
-                    childs.push_back(FindNode(c->ID)->Name);
+                    childs.push_back(c->node->Name);
 
                 if(dtd_ready) {
-                    validateAttributes(document, errors, node->Name, names, values, &valid);
-                    validateElements(document, errors, node->Name, childs, &valid);
+                    validateAttributes(document, errors, graph->node->Name, names, values, &valid);
+                    validateElements(document, errors, graph->node->Name, childs, &valid);
                 }
                 
                 if(config_ready)
-                    validateAttributesByElement(configs, node->Name, nameValue, errors, &valid);
+                    validateAttributesByElement(configs, graph->node->Name, nameValue, errors, &valid);
 
                 for(auto & c: graph->childs)
                     validateGraph(c);
@@ -972,9 +986,119 @@ struct Example:
         }
 
 
-        void BuildNodes() {
-            for(auto& node : m_Nodes)
-                BuildNode(&node);
+        void inventoryDisplay(Graph* graph, vector<ed::NodeId> selectedNodes, ImGuiIO io) {
+            if(graph) {
+                ImGui::PushID(graph->ID.AsPointer());
+                auto start = ImGui::GetCursorScreenPos();
+
+                if(const auto progress = GetTouchProgress(graph->ID)) {
+                    ImGui::GetWindowDrawList()->AddLine(
+                        start + ImVec2(-8, 0),
+                        start + ImVec2(-8, ImGui::GetTextLineHeight()),
+                        IM_COL32(255, 0, 0, 255 - (int)(255 * progress)), 4.0f);
+                }
+
+                bool isSelected = std::find(selectedNodes.begin(), selectedNodes.end(), graph->ID) != selectedNodes.end();
+                string temp = "";
+
+                if(!graph->node->Inputs.empty()) {
+                    if(graph->node->HasValue)
+                        temp = " - " + graph->node->Inputs.back().Name;
+                }
+
+                if(ImGui::Selectable((graph->node->Name + temp + "##" + std::to_string(reinterpret_cast<uintptr_t>(graph->ID.AsPointer()))).c_str(), &isSelected)) {
+                    
+                    if(io.KeyCtrl) {
+                        
+                        if(isSelected)
+                            ed::SelectNode(graph->ID, true);
+                        else
+                            ed::DeselectNode(graph->ID);
+                    }
+                    else
+                        ed::SelectNode(graph->ID, false);
+
+                    ed::NavigateToSelection();
+                }
+
+                ImGui::PopID();
+
+                for(auto & c : graph->childs)
+                    inventoryDisplay(c, selectedNodes, io);
+            }
+        }
+
+
+        void nodeDisplay(Graph* graph, util::BlueprintNodeBuilder builder, Pin* newLinkPin) {
+            if(graph) {
+
+                builder.Begin(graph->node->ID);
+
+                builder.Header(graph->node->Color);
+                ImGui::Spring(0);
+                ImGui::TextUnformatted(graph->node->Name.c_str());
+                ImGui::Spring(1);
+                ImGui::Dummy(ImVec2(0, 28));
+                ImGui::Spring(0);
+                builder.EndHeader();
+
+
+                for(auto& input : graph->node->Inputs) {
+                    auto alpha = ImGui::GetStyle().Alpha;
+
+                    if(newLinkPin && !CanCreateLink(newLinkPin, &input) && &input != newLinkPin)
+                        alpha = alpha * (48.0f / 255.0f);
+
+                    builder.Input(input.ID);
+                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
+                    DrawPinIcon(input, IsPinLinked(input.ID), (int)(alpha * 255));
+                    ImGui::Spring(0);
+
+                    if(!input.Name.empty()) {
+                        ImGui::TextUnformatted(input.Name.c_str());
+                        ImGui::Spring(0);
+                    }
+
+                    ImGui::PopStyleVar();
+                    builder.EndInput();
+                }
+
+                for (auto& output : graph->node->Outputs) {
+                    auto alpha = ImGui::GetStyle().Alpha;
+
+                    if(newLinkPin && !CanCreateLink(newLinkPin, &output) && &output != newLinkPin)
+                        alpha = alpha * (48.0f / 255.0f);
+
+                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
+                    builder.Output(output.ID);
+
+
+                    if (!output.Name.empty()) {
+                        ImGui::Spring(0);
+                        ImGui::TextUnformatted(output.Name.c_str());
+                    }
+
+                    ImGui::Spring(0);
+                    DrawPinIcon(output, IsPinLinked(output.ID), (int)(alpha * 255));
+                    ImGui::PopStyleVar();
+                    builder.EndOutput();
+                }
+
+                builder.End();
+
+                for(auto & c : graph->childs)
+                    nodeDisplay(c, builder, newLinkPin);
+            }
+        }
+
+
+        void BuildNodes(Graph* graph) {
+            if(graph) {
+                BuildNode(graph->node);
+
+                for(auto & c : graph->childs)
+                    BuildNodes(c);
+            }
         }
 
 
@@ -1206,7 +1330,7 @@ struct Example:
         }
         
 
-        void ShowNodeCreation(bool* show = nullptr, bool* stay = nullptr, ed::NodeId* ID = nullptr) {
+        void ShowNodeCreation(bool* show = nullptr, bool* stay = nullptr, Node** node = nullptr) {
             if(!ImGui::Begin("Node Creation", show)) {
                 ImGui::End();
                 return;
@@ -1255,7 +1379,7 @@ struct Example:
             vector<tuple<string, string, bool>> map;
 
             if(!(*stay)) {
-                *ID = SpawnElementNode(isClear, value, getAttributesTypes(configs, value), attributes, false);
+                *node = SpawnElementNode(isClear, value, getAttributesTypes(configs, value), attributes, false, false);
                 strcpy(value, "");
                 strcpy(att, "");
                 attributes_used = 0;
@@ -1369,7 +1493,7 @@ struct Example:
 
             ImGui::Spring(0.0f);
             
-            if(ImGui::Button(" Save Files "))
+            if(ImGui::Button(" Save Files ") && !isClear)
                 showSave = true;
 
             ImGui::Spring(0.0f);
@@ -1447,42 +1571,7 @@ struct Example:
             ImGui::TextUnformatted("Nodes");
             ImGui::Indent();
 
-            for (auto& node : m_Nodes) {
-                ImGui::PushID(node.ID.AsPointer());
-                auto start = ImGui::GetCursorScreenPos();
-
-                if(const auto progress = GetTouchProgress(node.ID)) {
-                    ImGui::GetWindowDrawList()->AddLine(
-                        start + ImVec2(-8, 0),
-                        start + ImVec2(-8, ImGui::GetTextLineHeight()),
-                        IM_COL32(255, 0, 0, 255 - (int)(255 * progress)), 4.0f);
-                }
-
-                bool isSelected = std::find(selectedNodes.begin(), selectedNodes.end(), node.ID) != selectedNodes.end();
-                string temp = "";
-
-                if(!node.Inputs.empty()) {
-                    if(node.HasValue)
-                        temp = " - " + node.Inputs.back().Name;
-                }
-
-                if(ImGui::Selectable((node.Name + temp + "##" + std::to_string(reinterpret_cast<uintptr_t>(node.ID.AsPointer()))).c_str(), &isSelected)) {
-                    
-                    if(io.KeyCtrl) {
-                        
-                        if(isSelected)
-                            ed::SelectNode(node.ID, true);
-                        else
-                            ed::DeselectNode(node.ID);
-                    }
-                    else
-                        ed::SelectNode(node.ID, false);
-
-                    ed::NavigateToSelection();
-                }
-
-                ImGui::PopID();
-            }
+            inventoryDisplay(graph, selectedNodes, io);
 
             ImGui::Unindent();
 
@@ -1595,44 +1684,54 @@ struct Example:
             
 
         vector<tuple<int, float, float>> loadJSON() {
+            vector<tuple<int, float, float>> info;
+            Document mydoc;
+            ParseResult ok;
+
             ifstream file(json_name.c_str());
 
             vector<char> buf((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
             buf.push_back('\0');
 
             file.close();
+            
+            ok = mydoc.Parse(&buf[0]);
 
-            Document mydoc;
-            mydoc.Parse(&buf[0]);
-            StringBuffer sb;
-            Writer<StringBuffer> writer(sb);
+            if(ok) {
+                StringBuffer sb;
+                Writer<StringBuffer> writer(sb);
 
-            vector<tuple<int, float, float>> info;
-            int id;
-            float x, y;
+                int id;
+                float x, y;
 
-            const Value &ns = mydoc["nodes"];
+                const Value &ns = mydoc["nodes"];
 
-            assert(ns.IsArray());
+                assert(ns.IsArray());
 
-            for(Value::ConstValueIterator it1 = ns.Begin(); it1 != ns.End(); ++it1) {
-                const Value &n = *it1;
-                assert(n.IsObject());
-                
-                for(Value::ConstMemberIterator it2 = n.MemberBegin(); it2 != n.MemberEnd(); ++it2) {              
-                    const char* name = it2->name.GetString();
+                for(Value::ConstValueIterator it1 = ns.Begin(); it1 != ns.End(); ++it1) {
+                    const Value &n = *it1;
+                    assert(n.IsObject());
                     
-                    if(strcmp(name, "id") == 0)
-                        id = it2->value.GetInt();
+                    for(Value::ConstMemberIterator it2 = n.MemberBegin(); it2 != n.MemberEnd(); ++it2) {              
+                        const char* name = it2->name.GetString();
+                        
+                        if(strcmp(name, "id") == 0)
+                            id = it2->value.GetInt();
 
-                    else if(strcmp(name, "x") == 0)
-                        x = it2->value.GetFloat();
+                        else if(strcmp(name, "x") == 0)
+                            x = it2->value.GetFloat();
 
-                    else if(strcmp(name, "y") == 0)
-                        y = it2->value.GetFloat();
+                        else if(strcmp(name, "y") == 0)
+                            y = it2->value.GetFloat();
+                    }
+
+                    info.push_back(make_tuple(id, x, y));
                 }
-
-                info.push_back(make_tuple(id, x, y));
+ 
+            }
+            else {
+                json_ready = ok;
+                errors.insert(string("Error loading JSON for node state!!"));
             }
 
             return info;
@@ -1643,29 +1742,32 @@ struct Example:
             const auto ind = string(graph->level_x, '\t');
 
             if(graph) {
-                Node* temp = FindNode(graph->ID);
-
-                *out << ind << "<" << temp->Name;
+                *out << ind << "<" << graph->node->Name;
                 
-                int s = (temp->Inputs).size();
+                int sI = (graph->node->Inputs).size();
 
-                if(s < 2 + temp->HasValue)
-                    *out << ">" << (temp->HasValue? "" : "\n");   
-                
-                s -= temp->HasValue;
-
-                for(int i = ((graph->parent) ? 1 : 0); i < s; i++)
-                    *out << " " << regex_replace(((temp->Inputs).at(i)).Name, regex(" = "), string("=\""))
-                        << (i < (s - 1) ? "\"" : "\">") << ((!temp->HasValue && !(i < (s - 1))) ? "\n" : "");
+                if(sI < (2 + (graph->node->HasValue || (graph->parent ? 0 : 1))))
+                    *out << ">" << (graph->node->HasValue ? "" : "\n");
             
-                if(temp->HasValue)
-                    *out << temp->Inputs.back().Name;
+                sI -= graph->node->HasValue;
+
+                for(auto & e : graph->node->Outputs)
+                    if(!e.Name.empty())
+                        *out << " " << regex_replace(e.Name, regex(" = "), string("=\"")) << "\"";
+
+                for(int i = ((graph->parent) ? 1 : 0); i < sI; i++)
+                    *out << " " << regex_replace(((graph->node->Inputs).at(i)).Name, regex(" = "), string("=\""))
+                         << (i < (sI - 1) ? "\"" : (graph->node->Closed ? "\"/>" : "\">")) << ((!graph->node->HasValue && !(i < (sI - 1))) ? "\n" : "");
+            
+                if(graph->node->HasValue)
+                    *out << graph->node->Inputs.back().Name;
                 
                 else
                     for(auto c : graph->childs)
                         saveXML(c, out);
 
-                *out << (temp->HasValue ? "" : ind.c_str()) << "</" << temp->Name << ">" << endl;
+                if(!graph->node->Closed)
+                    *out << (graph->node->HasValue ? "" : ind.c_str()) << "</" << graph->node->Name << ">" << endl;
             }
         }
 
@@ -1675,6 +1777,7 @@ struct Example:
 
             temp->current = *current;
             temp->parent = parent;
+            temp->node = NULL;
 
             bool isRoot = (parent) ? false : true;
 
@@ -1698,16 +1801,16 @@ struct Example:
             if(node->ClosingType() == XMLElement::ElementClosingType::CLOSED)
                 closed = true;
 
-            temp->ID = SpawnElementNode(isRoot, string(node->Name()), getAttributesTypes(configs, string(node->Name())),
-                                        attributes, value ? true : false);
+            temp->node = SpawnElementNode(isRoot, string(node->Name()), getAttributesTypes(configs, string(node->Name())),
+                                          attributes, value ? true : false, closed);
+
+            temp->ID = temp->node->ID;
 
             if(closed || value) {
-                Node* t = FindNode(temp->ID);
-
                 if(value && !closed)
-                    t->Inputs.emplace_back(GetNextId(), string(value->Value()), PinType::Function);
+                    temp->node->Inputs.emplace_back(GetNextId(), string(value->Value()), PinType::Function);
 
-                t->Outputs.erase(t->Outputs.begin());
+                temp->node->Outputs.erase(temp->node->Outputs.begin());
             }
 
             if(flag) {
@@ -1725,8 +1828,17 @@ struct Example:
 
 
         void loadXML() {
-            doc.LoadFile(xml_name);
-            root_node = doc.RootElement();
+            XMLError err = doc.LoadFile(xml_name);
+
+            if(!err) {
+                xml_ready = true;
+                root_node = doc.RootElement();
+            }
+            
+            else {
+                xml_ready = false;
+                errors.insert(string("Error loading XML file!!"));
+            }
         }
 
 
@@ -1779,62 +1891,72 @@ struct Example:
             if(json_ready && xml_changed) {
                 json_info = loadJSON();
 
-                if(config_ready)
-                    config_ready = loadConfig(configs, config_name, errors);
-                
                 loadXML();
 
-                current = 0;
-
-                graph = build(root_node, &current, NULL, true);
-
-                levels_x = levelXOrder(graph);
-
-                link(graph, &levels_x, true);
-                linkAttributes(graph);
-
-                ed::NavigateToContent();
-                json_ready = false;
+                if(json_ready && xml_ready) {
+                    
+                    if(config_ready)
+                        config_ready = loadConfig(configs, config_name, errors);
                 
-                if(graph)
-                    isClear = false;
+                    current = 0;
 
-                if(dtd_ready)
-                    parseDocument(document, dtd_name);
+                    graph = build(root_node, &current, NULL, true);
 
-                if(dtd_ready || config_ready)
-                    validateGraph(graph);
+                    levels_x = levelXOrder(graph);
+
+                    link(graph, &levels_x, true);
+                    linkAttributes(graph);
+
+                    ed::NavigateToContent();
+                    json_ready = false;
+                    xml_ready = false;
+                    
+                    if(graph)
+                        isClear = false;
+
+                    if(dtd_ready)
+                        parseDocument(document, dtd_name);
+
+                    if(dtd_ready || config_ready)
+                        validateGraph(graph);
+                }
             }
             else if(xml_ready && xml_changed) {
-                if(config_ready)
-                    config_ready = loadConfig(configs, config_name, errors);
-
                 loadXML();
                 
-                current = 0;
-                graph = build(root_node, &current, NULL, false);
+                if(xml_ready) {
+                    if(config_ready)
+                        config_ready = loadConfig(configs, config_name, errors);
 
-                levels_x = levelXOrder(graph);
+                    current = 0;
+                    graph = build(root_node, &current, NULL, false);
+                    
+                    levels_x = levelXOrder(graph);
 
-                link(graph, &levels_x, true);
-                linkAttributes(graph);
+                    link(graph, &levels_x, true);
 
-                readjust(graph, maxWidth(&levels_x), height(graph), &levels_x);
+                    linkAttributes(graph);
 
-                ed::NavigateToContent();
-                xml_ready = false;
-                
-                if(graph)
-                    isClear = false;
+                    readjust(graph, maxWidth(&levels_x), height(graph), &levels_x);
 
-                if(dtd_ready)
-                    parseDocument(document, dtd_name);
+                    ed::NavigateToContent();
+                    xml_ready = false;
+                    
+                    if(graph)
+                        isClear = false;
 
-                if(dtd_ready || config_ready)
-                    validateGraph(graph);
+                    if(dtd_ready)
+                        parseDocument(document, dtd_name);
+
+                    if(dtd_ready || config_ready)
+                        validateGraph(graph);
+                }
             }
 
-            BuildNodes();
+            BuildNodes(graph);
+
+            for(auto & sG : secondaryGraphs)
+                BuildNodes(sG);
 
             static ed::NodeId contextNodeId      = 0;
             static ed::LinkId contextLinkId      = 0;
@@ -1857,65 +1979,13 @@ struct Example:
                 util::BlueprintNodeBuilder builder(m_HeaderBackground, GetTextureWidth(m_HeaderBackground), GetTextureHeight(m_HeaderBackground));
 
                 /* Display Nodes */
-                for(auto& node : m_Nodes) {
+                nodeDisplay(graph, builder, newLinkPin);
 
-                    builder.Begin(node.ID);
-
-                    builder.Header(node.Color);
-                    ImGui::Spring(0);
-                    ImGui::TextUnformatted(node.Name.c_str());
-                    ImGui::Spring(1);
-                    ImGui::Dummy(ImVec2(0, 28));
-                    ImGui::Spring(0);
-                    builder.EndHeader();
-
-
-                    for(auto& input : node.Inputs) {
-                        auto alpha = ImGui::GetStyle().Alpha;
-
-                        if(newLinkPin && !CanCreateLink(newLinkPin, &input) && &input != newLinkPin)
-                            alpha = alpha * (48.0f / 255.0f);
-
-                        builder.Input(input.ID);
-                        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
-                        DrawPinIcon(input, IsPinLinked(input.ID), (int)(alpha * 255));
-                        ImGui::Spring(0);
-
-                        if(!input.Name.empty()) {
-                            ImGui::TextUnformatted(input.Name.c_str());
-                            ImGui::Spring(0);
-                        }
-
-                        ImGui::PopStyleVar();
-                        builder.EndInput();
-                    }
-
-                    for (auto& output : node.Outputs) {
-                        auto alpha = ImGui::GetStyle().Alpha;
- 
-                        if(newLinkPin && !CanCreateLink(newLinkPin, &output) && &output != newLinkPin)
-                            alpha = alpha * (48.0f / 255.0f);
-
-                        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
-                        builder.Output(output.ID);
-
-
-                        if (!output.Name.empty()) {
-                            ImGui::Spring(0);
-                            ImGui::TextUnformatted(output.Name.c_str());
-                        }
-
-                        ImGui::Spring(0);
-                        DrawPinIcon(output, IsPinLinked(output.ID), (int)(alpha * 255));
-                        ImGui::PopStyleVar();
-                        builder.EndOutput();
-                    }
-
-                    builder.End();
-                }
+                for(auto & sG : secondaryGraphs)
+                    nodeDisplay(sG, builder, newLinkPin);
 
                 /* Display Links */
-                if(!m_hideLinks && runnable) {
+                if(!m_hideLinks) {
                     for(auto& link : m_Links)
                         ed::Link(link.ID, link.StartPinID, link.EndPinID, link.Color, 2.0f);
                 }
@@ -1948,8 +2018,20 @@ struct Example:
                         ed::PinId startPinId = 0, endPinId = 0;
 
                         if(ed::QueryNewLink(&startPinId, &endPinId)) {
-                            auto startPin = FindPin(startPinId);
-                            auto endPin   = FindPin(endPinId);
+                            bool foundS = false, foundE = false;
+                            Pin* startPin; 
+                            FindPin(graph, startPinId, &startPin, &foundS);
+                            
+                            if(!foundS)
+                                for(auto & sG : secondaryGraphs)
+                                    FindPin(sG, startPinId, &startPin, &foundS);
+
+                            Pin* endPin; 
+                            FindPin(graph, endPinId, &endPin, &foundE);
+
+                            if(!foundE)
+                                for(auto & sG : secondaryGraphs)
+                                    FindPin(sG, endPinId, &endPin, &foundE);
 
                             newLinkPin = startPin ? startPin : endPin;
 
@@ -1999,14 +2081,25 @@ struct Example:
 
                         ed::PinId pinId = 0;
                         if(ed::QueryNewNode(&pinId)) {
-                            newLinkPin = FindPin(pinId);
+                            bool foundN = false;
+                            FindPin(graph, pinId, &newLinkPin, &foundN);
+
+                            if(!foundN)
+                                for(auto & sG : secondaryGraphs)
+                                    FindPin(sG, pinId, &newLinkPin, &foundN);
                             
                             if(newLinkPin)
                                 showLabel("+ Create Node", ImColor(32, 45, 32, 180));
 
                             if(ed::AcceptNewItem()) {
                                 createNewNode  = true;
-                                newNodeLinkPin = FindPin(pinId);
+                                bool foundNN = false;
+                                FindPin(graph, pinId, &newNodeLinkPin, &foundNN);
+
+                                if(!foundNN)
+                                    for(auto & sG : secondaryGraphs)
+                                        FindPin(sG, pinId, &newNodeLinkPin, &foundNN);
+
                                 newLinkPin = nullptr;
                                 ed::Suspend();
                                 ImGui::OpenPopup("Create New Node");
@@ -2028,19 +2121,24 @@ struct Example:
                                 Link* link = FindLink(linkId, &isAtt);
 
                                 if(!isAtt) {
-                                    ed::NodeId nodeId = FindNodeWithInputPin(link->EndPinID)->ID;
+                                    Node* n = NULL;
+                                    bool found = false;
+
+                                    FindNodeWithInputPin(graph, &n, link->EndPinID, &found);
                                     
                                     bool deleted = false;
 
-                                    lookupDeleteGraph(graph, nodeId, &deleted);
+                                    lookupDeleteGraph(graph, n->ID, &deleted);
+
                                     recalibrate();
+
                                     revalidate();
 
                                     if(!graph)
                                         isClear = true;
 
                                     if(!deleted)
-                                        lookupDeleteSecondaryGraph(nodeId, &deleted);
+                                        lookupDeleteSecondaryGraph(n->ID, &deleted);
                                 }
                                 else
                                     DeleteLinkToPin(link->EndPinID);
@@ -2096,12 +2194,14 @@ struct Example:
             static bool showNodeEditing = false, stayEditing = true;
 
             if(ImGui::BeginPopup("Node Context Menu")) {
-                auto node = FindNode(contextNodeId);
+                bool found = false;
+                Node* node = NULL;
+                FindNode(graph, &node, contextNodeId, &found);                
 
                 ImGui::TextUnformatted("Node Context Menu");
                 ImGui::Separator();
                 
-                if(node) {
+                if(found) {
                     ImGui::Text("ID: %p", node->ID.AsPointer());
                     ImGui::Text("Type: %s", node->Type == NodeType::Element ? "Element" : "");
                     ImGui::Text("Inputs: %d", (int)node->Inputs.size());
@@ -2133,7 +2233,14 @@ struct Example:
             }
 
             if(ImGui::BeginPopup("Pin Context Menu")) {
-                auto pin = FindPin(contextPinId);
+                bool foundP = false;
+                Pin* pin; 
+                
+                FindPin(graph, contextPinId, &pin, &foundP);
+
+                if(!foundP)
+                    for(auto & sG : secondaryGraphs)
+                        FindPin(sG, contextPinId, &pin, &foundP);
 
                 ImGui::TextUnformatted("Pin Context Menu");
                 ImGui::Separator();
@@ -2181,7 +2288,7 @@ struct Example:
 
             static bool showNodeCreation = false, stay = true;
             ed::NodeId ID = 0;
-            Node* node;
+            Node* node = NULL;
 
             if(ImGui::BeginPopup("Create New Node")) {
 
@@ -2192,11 +2299,9 @@ struct Example:
             }
 
             if(showNodeCreation) {
-                ShowNodeCreation(&showNodeCreation, &stay, &ID);
+                ShowNodeCreation(&showNodeCreation, &stay, &node);
 
                 if(!stay && !showNodeCreation) {
-                    node = (ID.Get() > 0) ? FindNode(ID) : NULL;
-
                     if(node) {
                         createGraph(node);
                         BuildNode(node);
@@ -2261,7 +2366,6 @@ struct Example:
         Configs                                 configs = NULL;
         set<string>                             errors;
         const int                               m_PinIconSize = 24;
-        vector<Node>                            m_Nodes;
         vector<Link>                            m_Links;
         vector<Link>                            m_AttributeLinks;
         vector<vector<int>>                     levels_x;

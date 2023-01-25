@@ -3,8 +3,7 @@
 <MyStudentsData>
 	<Student student_type="Full-time">
 		<Name>Sean</Name>
-		<Certification state="certified">
-		</Certification>
+		<Certification state="certified"/>
 	</Student>
 	<Student student_type="Part-time">
 		<Name>Sarah</Name>
