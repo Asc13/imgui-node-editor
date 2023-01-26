@@ -270,6 +270,7 @@ struct Example:
             return false;
         }
 
+
         Link* FindLink(ed::LinkId id, bool* isAttribute) {
             for(auto& link : m_Links)
                 if(link.ID == id)
@@ -404,6 +405,7 @@ struct Example:
 
             return true;
         }
+
 
         bool CanCreateAttributeLink(Pin* a, Pin* b) {
             string name1 = split(a->Name, regex(" = ")).at(0),
@@ -584,10 +586,11 @@ struct Example:
         void readjust(Graph* graph, int max_witdh, int max_heigth, vector<vector<int>>* levels_x) {
             if(graph) {
                 bool isRoot = (graph->parent) ? false : true;
-
+                
                 float tam_max_y = (300.0 * (float) max_witdh);
                 float x, y;
-
+                
+                
                 if(isRoot) {
                     x = 0.0; y = tam_max_y / 2.0;
                 }
@@ -644,8 +647,10 @@ struct Example:
             if(type == PinType::Double)
                 return reinterpret_cast<void*>(&stod(tokens[1]));*/
 
-            if(type == PinType::String)
-                return reinterpret_cast<void*>(&tokens[1]);
+            if(type == PinType::String) {
+                char* value = strdup(tokens[1].c_str());
+                return value;
+            }
 
             return NULL;
         }
@@ -665,7 +670,7 @@ struct Example:
                 return reinterpret_cast<void*>(&stod(tokens[1]));*/
 
             if(type == PinType::String)
-                return *reinterpret_cast<string*>(value);
+                return string((char*) value);
 
             return string("");
         }
@@ -705,29 +710,30 @@ struct Example:
                     system(string("cd /home/bruno/Desktop/---/PI/imgui-node-editor/examples/blueprints-example/files/functions/ ;"
                            "rm " + object + "; "
                            "g++ -shared " + file + " -o " + object).c_str());
-
+                    
                     void* o_file = dlopen(string("examples/blueprints-example/files/functions/" + object).c_str(), RTLD_LAZY);
 
                     func_handle handler;
                     int i1 = 1 - (g->parent ? 0 : 1), i2 = i1 + 1;
                     int o3 = 1 - g->node->HasValue;
 
-                    void* z = (intptr_t) 0;
+                    void* z;
                     void* x = cast(g->node->Inputs[i1].Name, g->node->Inputs[i1].Type); 
                     void* y = cast(g->node->Inputs[i2].Name, g->node->Inputs[i2].Type);
 
                     if(o_file) {
                         auto link = reinterpret_cast<func_handle>(dlsym(o_file, function.c_str()));
 
-                        if(link)
+                        if(link) {
                             z = link(x, y);
+                        }
 
                         dlclose(o_file);
                     }
 
                     vector<string> tokens = split(g->node->Outputs[o3].Name, regex(" = "));        
                     g->node->Outputs[o3].Name = tokens.at(0) + " = " + uncast(z, g->node->Outputs[o3].Type);
-
+                    
                     tuple<string, string> elementAtt = getConfigByIndex(configs, g->node->Name, *used.begin());
                     used.erase(used.begin());
 
@@ -2325,6 +2331,7 @@ struct Example:
                     if(ImGui::MenuItem("Run")) {
                         set<int> used;
                         runGraph(graph, used);
+                        revalidate();
                     }
                 }
 

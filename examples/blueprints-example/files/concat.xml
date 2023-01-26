@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<Function graph="runnable" phrase="">
+	<Word1 out="" in1="" in2="concatenação">cat.cpp</Word1>
+	<Word2 out="" in1="" in2="testar a">cat.cpp</Word2>
+    <Word3 out="" in1="" in2="para">cat.cpp</Word3>
+    <Word4 out="" in1="Uma" in2="frase">cat.cpp</Word4>
+</Function>

@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<FILE>
- name="..\..\xmldata\treebank.dat">
+<FILE name="..\..\xmldata\treebank.dat">
 	<EMPTY>
 		<S>
 			<NP>
