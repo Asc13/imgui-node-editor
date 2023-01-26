@@ -456,6 +456,33 @@ vector<vector<string>> getLinks(Configs configs) {
 }
 
 
+string getPointer(Configs configs, string element, set<int> & used) {
+    for(int i = 0; i < configs->used; ++i) {
+        if(isLink(configs->configs[i]) && !used.count(i)) {
+            if(strcmp(configs->configs[i]->element, element.c_str()) == 0) {
+                used.insert(i);
+                return configs->configs[i]->pointerElement;
+            }
+        
+            if(strcmp(configs->configs[i]->pointerElement, element.c_str()) == 0) {
+                used.insert(i);
+                return configs->configs[i]->element;
+            }
+        }
+
+    }
+
+    return string("");
+}
+
+
+tuple<string, string> getConfigByIndex(Configs configs, string element, int index) {
+    return (element.compare(configs->configs[index]->element) == 0) ? 
+           make_tuple(configs->configs[index]->pointerElement, configs->configs[index]->pointer) :
+           make_tuple(configs->configs[index]->element, configs->configs[index]->attribute);
+}
+
+
 bool isValidLink(Configs configs, string name, string pointer) {
     for(int i = 0; i < configs->used; i++)
         if(strcmp(configs->configs[i]->attribute, name.c_str()) == 0 &&

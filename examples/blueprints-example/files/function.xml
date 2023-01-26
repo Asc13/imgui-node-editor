@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<Function z="0">
+<Function graph="runnable" z="0">
 	<Sum z="0" x="4" y="6">sum.cpp</Sum>
 	<Sub z="0" x="0" y="5">sub.cpp</Sub>
 </Function>

@@ -620,22 +620,128 @@ struct Example:
         }
 
 
-        void runGraph() {
-            system("cd /home/bruno/Desktop/---/PI/imgui-node-editor/examples/blueprints-example/files/functions/ ;" 
-                   "g++ -shared sum.cpp -o sum.o");
+        bool toBool(string value) {
+            if(value.compare("True") == 0 || 
+               value.compare("1") == 0 || 
+               value.compare("true") == 0)
+                return true;
+            return false;
+        }
 
-            void* sum = dlopen("examples/blueprints-example/files/functions/sum.o", RTLD_LAZY);
-            int x = 5, y = 4, z = 0;
 
-            func_handle handler;
+        void* cast(string att, PinType type) {
+            vector<string> tokens = split(att, regex(" = "));
 
-            if(sum) {
-                auto func = reinterpret_cast<func_handle>(dlsym(sum, "sum"));
+            if(type == PinType::Bool)
+                return reinterpret_cast<void*>(toBool(tokens[1]));
 
-                if(func)
-                    z = (intptr_t) func(x, y);
+            if(type == PinType::Int)
+                return reinterpret_cast<void*>(stoi(tokens[1]));
 
-                dlclose(sum);
+            /*if(type == PinType::Float)
+                return reinterpret_cast<void*>(static_cast<float*>(stof(tokens[1])));
+
+            if(type == PinType::Double)
+                return reinterpret_cast<void*>(&stod(tokens[1]));*/
+
+            if(type == PinType::String)
+                return reinterpret_cast<void*>(&tokens[1]);
+
+            return NULL;
+        }
+
+
+        string uncast(void* value, PinType type) {
+            if(type == PinType::Bool)
+                return ((intptr_t) value) ? string("True") : string("False");
+
+            if(type == PinType::Int)
+                return to_string((intptr_t) value);
+
+            /*if(type == PinType::Float)
+                return reinterpret_cast<void*>(static_cast<float*>(stof(tokens[1])));
+
+            if(type == PinType::Double)
+                return reinterpret_cast<void*>(&stod(tokens[1]));*/
+
+            if(type == PinType::String)
+                return *reinterpret_cast<string*>(value);
+
+            return string("");
+        }
+
+
+        void NextNodeByLink(Graph* graph, Graph** next, string pointer, bool* found) {
+            if(graph) {
+                if(graph->node->Name.compare(pointer) == 0) {
+                    *next = graph;
+                    *found = true;
+                }
+
+                if(!(*found))
+                    for(auto & c : graph->childs)
+                        NextNodeByLink(c, next, pointer, found);
+            }
+        }
+
+
+        void runGraph(Graph* g, set<int> & used) {
+            if(g) {
+                Graph* next = NULL;
+                bool found = false;
+
+                string pointer = getPointer(configs, g->node->Name, used);
+
+                NextNodeByLink(graph, &next, pointer, &found);
+
+                if(found)
+                    runGraph(next, used);
+
+                if(g->node->HasValue) {
+                    string file = g->node->Inputs.back().Name;
+                    string object = regex_replace(file, regex("cpp"), string("o"));
+                    string function = regex_replace(file, regex(".cpp"), string(""));
+
+                    system(string("cd /home/bruno/Desktop/---/PI/imgui-node-editor/examples/blueprints-example/files/functions/ ;"
+                           "rm " + object + "; "
+                           "g++ -shared " + file + " -o " + object).c_str());
+
+                    void* o_file = dlopen(string("examples/blueprints-example/files/functions/" + object).c_str(), RTLD_LAZY);
+
+                    func_handle handler;
+                    int i1 = 1 - (g->parent ? 0 : 1), i2 = i1 + 1;
+                    int o3 = 1 - g->node->HasValue;
+
+                    void* z = (intptr_t) 0;
+                    void* x = cast(g->node->Inputs[i1].Name, g->node->Inputs[i1].Type); 
+                    void* y = cast(g->node->Inputs[i2].Name, g->node->Inputs[i2].Type);
+
+                    if(o_file) {
+                        auto link = reinterpret_cast<func_handle>(dlsym(o_file, function.c_str()));
+
+                        if(link)
+                            z = link(x, y);
+
+                        dlclose(o_file);
+                    }
+
+                    vector<string> tokens = split(g->node->Outputs[o3].Name, regex(" = "));        
+                    g->node->Outputs[o3].Name = tokens.at(0) + " = " + uncast(z, g->node->Outputs[o3].Type);
+
+                    tuple<string, string> elementAtt = getConfigByIndex(configs, g->node->Name, *used.begin());
+                    used.erase(used.begin());
+
+                    found = false;
+                    NextNodeByLink(graph, &next, get<0>(elementAtt), &found);
+
+                    if(found)
+                        for(int i = (next->parent ? 1 : 0); i < (next->node->Inputs.size() - next->node->HasValue); i++) {
+                            tokens = split(next->node->Inputs[i].Name, regex(" = "));
+
+                            if(tokens.at(0).compare(get<1>(elementAtt)) == 0)       
+                                next->node->Inputs[i].Name = tokens.at(0) + " = " + uncast(z, g->node->Outputs[o3].Type);
+                        }
+                } 
             }
         }
         
@@ -1746,16 +1852,19 @@ struct Example:
                 
                 int sI = (graph->node->Inputs).size();
 
-                if(sI < (2 + (graph->node->HasValue || (graph->parent ? 0 : 1))))
-                    *out << ">" << (graph->node->HasValue ? "" : "\n");
-            
+                if(!graph->parent && runnable)
+                    *out << " graph=\"runnable\"";
+
+                if(sI < (1 + (graph->parent ? 1 : 0) + graph->node->HasValue))
+                    *out << (graph->node->Closed ? "/>" : ">") << (graph->node->HasValue ? "" : "\n");
+    
                 sI -= graph->node->HasValue;
 
                 for(auto & e : graph->node->Outputs)
                     if(!e.Name.empty())
                         *out << " " << regex_replace(e.Name, regex(" = "), string("=\"")) << "\"";
 
-                for(int i = ((graph->parent) ? 1 : 0); i < sI; i++)
+                for(int i = (graph->parent ? 1 : 0); i < sI; i++)
                     *out << " " << regex_replace(((graph->node->Inputs).at(i)).Name, regex(" = "), string("=\""))
                          << (i < (sI - 1) ? "\"" : (graph->node->Closed ? "\"/>" : "\">")) << ((!graph->node->HasValue && !(i < (sI - 1))) ? "\n" : "");
             
@@ -2214,7 +2323,8 @@ struct Example:
                     ImGui::Separator();
 
                     if(ImGui::MenuItem("Run")) {
-                        
+                        set<int> used;
+                        runGraph(graph, used);
                     }
                 }
 
@@ -2245,7 +2355,7 @@ struct Example:
                 ImGui::TextUnformatted("Pin Context Menu");
                 ImGui::Separator();
                 
-                if(pin){
+                if(pin) {
                     ImGui::Text("ID: %p", pin->ID.AsPointer());
                     
                     if(pin->Node)
